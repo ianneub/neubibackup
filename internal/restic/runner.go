@@ -84,7 +84,13 @@ func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer,
 	err = cmd.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("restic exited with code %d", exitErr.ExitCode())
+			exitCode := exitErr.ExitCode()
+			// Exit code 3 means some files couldn't be read but snapshot was created
+			if exitCode == 3 {
+				fmt.Fprintf(logWriter, "\nBackup completed with warnings (some files could not be read)\n")
+				return nil
+			}
+			return fmt.Errorf("restic exited with code %d", exitCode)
 		}
 		return err
 	}

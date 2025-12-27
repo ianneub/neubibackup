@@ -1,0 +1,31 @@
+# Binaries
+neubibackup
+neubibackup.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Build output
+/build/
+/dist/
+
+# Restic binaries (downloaded, not committed)
+/binaries/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debug
+__debug_bin*

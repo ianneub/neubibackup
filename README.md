@@ -1,1 +1,165 @@
-# neubibackup
+# NeubiBackup
+
+A simple system tray application that automatically backs up your files using [restic](https://restic.net/).
+
+## Features
+
+- **Daily scheduled backups** - Set a time and your files are backed up automatically
+- **Missed backup detection** - If your computer was off or asleep, backs up when you return
+- **Retry with backoff** - Automatically retries failed backups (up to 5 attempts)
+- **System tray interface** - Runs quietly in the background with status at a glance
+- **Progress display** - See real-time progress during backups
+- **Monitoring integrations** - Optional healthchecks.io and Pushover notifications
+- **No restic installation required** - Restic is bundled with the app
+
+## Supported Platforms
+
+- macOS (Apple Silicon / arm64)
+- Windows (64-bit / amd64)
+
+## Installation
+
+Download the latest release for your platform:
+
+**[Download from GitHub Releases](https://github.com/ianneub/neubibackup/releases)**
+
+### macOS
+
+1. Download the `.dmg` file
+2. Open it and drag NeubiBackup to Applications
+3. On first launch, you may need to allow it in System Settings > Privacy & Security
+
+### Windows
+
+1. Download the `.msi` installer
+2. Run the installer and follow the prompts
+
+## Quick Start
+
+1. **Launch NeubiBackup** - The app starts in your system tray (menu bar on macOS)
+2. **Edit configuration** - On first run, a config file opens automatically. If not, click the tray icon and select "Open Config File"
+3. **Set your repository** - Add your restic repository URL and password
+4. **Add backup paths** - List the folders you want to back up
+5. **Save and close** - The app automatically reloads your configuration
+
+## Configuration
+
+Configuration is stored in `~/neubibackup/config.yaml`. Here's a complete example:
+
+```yaml
+version: 1
+
+# When to run daily backups (24-hour format)
+schedule:
+  time: "02:00"
+  timezone: "America/New_York"  # Optional, defaults to system timezone
+
+# Your restic repository
+repository:
+  # Examples:
+  # - Local: /Volumes/Backup/restic-repo
+  # - REST server: rest:https://user:pass@backup.example.com/repo
+  # - S3: s3:s3.amazonaws.com/bucket-name
+  # - Backblaze B2: b2:bucket-name:path/to/repo
+  path: "rest:https://user:pass@backup.example.com/repo"
+
+  # Password (choose one method):
+  password: "your-repository-password"
+  # OR use a file:
+  # password_file: "/path/to/password-file"
+  # OR use a command (most secure):
+  # password_command: "security find-generic-password -s restic -w"
+
+# What to back up
+backup:
+  paths:
+    - "/Users/yourname/Documents"
+    - "/Users/yourname/Pictures"
+  excludes:
+    - "*.tmp"
+    - ".DS_Store"
+    - "node_modules"
+    - ".Trash"
+
+# Optional: healthchecks.io monitoring
+healthchecks:
+  enabled: false
+  ping_url: "https://hc-ping.com/your-uuid-here"
+
+# Optional: Pushover notifications
+pushover:
+  enabled: false
+  user_key: "your-user-key"
+  api_token: "your-api-token"
+  on_failure: true
+  on_success: false
+```
+
+### Setting Up a Repository
+
+Before using NeubiBackup, you need a restic repository. See the [restic documentation](https://restic.readthedocs.io/en/latest/030_preparing_a_new_repo.html) for setup instructions.
+
+Common options:
+
+- **Local drive**: External hard drive or NAS
+- **Cloud storage**: Backblaze B2, AWS S3, Google Cloud Storage
+- **REST server**: Self-hosted [rest-server](https://github.com/restic/rest-server)
+
+## Usage
+
+### Tray Menu Options
+
+Click the tray icon to access:
+
+- **Status** - Shows time since last successful backup
+- **Backup Now** - Start an immediate backup
+- **Open Config File** - Edit your configuration
+- **Open Logs Folder** - View backup logs
+- **Start at Login** - Toggle automatic startup
+
+### Icon Status
+
+- **Green/checkmark** - Last backup succeeded
+- **Animated** - Backup in progress
+- **Red/warning** - Last backup failed or not configured
+
+## Data Location
+
+All NeubiBackup data is stored in `~/neubibackup/`:
+
+```
+~/neubibackup/
+├── config.yaml    # Your configuration
+├── state.yaml     # Backup state (managed by app)
+└── logs/          # Backup logs (last 25 kept)
+```
+
+## Troubleshooting
+
+### Backup keeps failing
+
+1. Click **Open Logs Folder** from the tray menu
+2. Open the most recent log file to see error details
+3. Common issues:
+   - Repository not accessible (check network/credentials)
+   - Invalid paths in backup configuration
+   - Insufficient permissions
+
+### App won't start
+
+- **macOS**: Check System Settings > Privacy & Security for blocked apps
+- **Windows**: Run as administrator if needed
+
+### Missed backups not running
+
+The app detects missed backups when:
+
+- It's running (either at startup or after wake from sleep)
+- The scheduled time has passed for today
+- No successful backup exists for today
+
+Make sure the app is set to **Start at Login** for reliable scheduling.
+
+## License
+
+MIT

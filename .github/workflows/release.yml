@@ -18,7 +18,7 @@ jobs:
           - os: macos-latest
             goarch: arm64
             arch_name: arm64
-          - os: macos-15-large
+          - os: macos-latest
             goarch: amd64
             arch_name: amd64
 

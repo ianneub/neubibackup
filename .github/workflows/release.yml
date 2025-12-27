@@ -52,26 +52,7 @@ jobs:
           go-version: "1.25"
 
       - name: Download restic binary for macOS
-        run: |
-          RESTIC_VERSION="0.18.1"
-          BINARIES_DIR="internal/restic"
-          mkdir -p "$BINARIES_DIR"
-
-          # Download the correct macOS binary for this architecture
-          URL="https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_darwin_${{ matrix.goarch }}.bz2"
-          curl -sL "$URL" | bunzip2 > "$BINARIES_DIR/restic_darwin_${{ matrix.goarch }}"
-          chmod +x "$BINARIES_DIR/restic_darwin_${{ matrix.goarch }}"
-
-          # Create dummy files for other platforms to satisfy embed directives
-          touch "$BINARIES_DIR/restic_windows_amd64.exe"
-          # Create dummy for the other macOS arch
-          if [ "${{ matrix.goarch }}" = "arm64" ]; then
-            touch "$BINARIES_DIR/restic_darwin_amd64"
-          else
-            touch "$BINARIES_DIR/restic_darwin_arm64"
-          fi
-
-          ls -la "$BINARIES_DIR/"
+        run: ./scripts/download-restic.sh darwin ${{ matrix.goarch }}
 
       - name: Get version from tag
         id: version
@@ -174,9 +155,9 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Download restic binaries
+      - name: Download restic binary for Windows
         shell: bash
-        run: ./scripts/download-restic.sh
+        run: ./scripts/download-restic.sh windows amd64
 
       - name: Get version from tag
         id: version

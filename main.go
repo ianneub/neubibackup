@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 
 	"neubibackup/assets"
 	"neubibackup/internal/autostart"
@@ -36,6 +37,7 @@ var (
 	powerWatcher  *power.Watcher
 	configWatcher *fsnotify.Watcher
 	tailscaleMgr  *tailscale.Manager
+	statusTicker  *time.Ticker
 
 	// Context for graceful shutdown
 	appCtx    context.Context
@@ -119,6 +121,19 @@ func onReady() {
 	// Start power watcher
 	powerWatcher = power.New(onSystemWake)
 	powerWatcher.Start()
+
+	// Start status refresh ticker (updates "Last backup: X minutes ago" display)
+	statusTicker = time.NewTicker(1 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-appCtx.Done():
+				return
+			case <-statusTicker.C:
+				updateStatus()
+			}
+		}
+	}()
 }
 
 func initTailscale() error {
@@ -648,5 +663,10 @@ func onExit() {
 	// Close config watcher
 	if configWatcher != nil {
 		configWatcher.Close()
+	}
+
+	// Stop status ticker
+	if statusTicker != nil {
+		statusTicker.Stop()
 	}
 }

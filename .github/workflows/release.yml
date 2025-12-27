@@ -27,13 +27,11 @@ jobs:
 
       - name: Free disk space
         run: |
-          # Aggressively remove unnecessary large directories to free disk space
+          # Remove unnecessary large directories to free disk space
           # See: https://github.com/actions/runner-images/issues/2840
+          # NOTE: Keep Xcode Command Line Tools for CGO compilation
           echo "Before cleanup:"
           df -h /
-
-          # Remove Xcode (huge, ~15GB)
-          sudo rm -rf /Applications/Xcode*.app || true
 
           # Remove Android SDK
           sudo rm -rf ~/Library/Android || true
@@ -83,7 +81,11 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" -o neubibackup .
+          CGO_ENABLED: 1
+        run: |
+          # Set SDKROOT for cross-compilation
+          export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" -o neubibackup .
 
       - name: Create app bundle
         run: |

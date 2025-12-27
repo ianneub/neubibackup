@@ -62,7 +62,14 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags "-X main.version=${{ github.sha }}" -o ${{ matrix.binary }} .
+          CGO_ENABLED: ${{ matrix.goos == 'darwin' && '1' || '0' }}
+        shell: bash
+        run: |
+          # Set SDKROOT for macOS cross-compilation
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          fi
+          go build -ldflags "-X main.version=${{ github.sha }}" -o ${{ matrix.binary }} .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

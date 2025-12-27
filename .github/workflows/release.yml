@@ -63,21 +63,53 @@ jobs:
           GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
         run: |
           # Set SDKROOT and configure C compiler for cross-compilation
           export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          # Set minimum deployment target to avoid "requires macOS 15.0" issues
+          # when cross-compiling from newer macOS versions
+          CGO_FLAGS="-mmacosx-version-min=10.15"
           if [ "${{ matrix.goarch }}" = "amd64" ]; then
-            export CGO_CFLAGS="-arch x86_64"
-            export CGO_LDFLAGS="-arch x86_64"
+            export CGO_CFLAGS="-arch x86_64 ${CGO_FLAGS}"
+            export CGO_LDFLAGS="-arch x86_64 ${CGO_FLAGS}"
+          else
+            export CGO_CFLAGS="${CGO_FLAGS}"
+            export CGO_LDFLAGS="${CGO_FLAGS}"
           fi
           go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" -o neubibackup .
+
+      - name: Verify binary architecture and deployment target
+        run: |
+          echo "Expected architecture: ${{ matrix.goarch }}"
+          file neubibackup
+          # Verify the architecture matches what we expected
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            file neubibackup | grep -q "x86_64" || (echo "ERROR: Binary is not x86_64!" && exit 1)
+          else
+            file neubibackup | grep -q "arm64" || (echo "ERROR: Binary is not arm64!" && exit 1)
+          fi
+          echo "Architecture verified successfully"
+
+          # Check minimum macOS version requirement
+          echo "Checking deployment target..."
+          otool -l neubibackup | grep -A 3 "LC_BUILD_VERSION" || otool -l neubibackup | grep -A 3 "LC_VERSION_MIN_MACOSX" || true
+          echo "Deployment target check complete"
 
       - name: Create app bundle
         run: |
           mkdir -p NeubiBackup.app/Contents/MacOS
           mkdir -p NeubiBackup.app/Contents/Resources
           cp neubibackup NeubiBackup.app/Contents/MacOS/neubibackup
-          cat > NeubiBackup.app/Contents/Info.plist << 'EOF'
+
+          # Set the architecture string for Info.plist
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            ARCH_STRING="x86_64"
+          else
+            ARCH_STRING="arm64"
+          fi
+
+          cat > NeubiBackup.app/Contents/Info.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -95,14 +127,31 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>LSMinimumSystemVersion</key>
-              <string>10.13</string>
+              <string>10.15</string>
               <key>LSUIElement</key>
               <true/>
               <key>NSHighResolutionCapable</key>
               <true/>
+              <key>LSArchitecturePriority</key>
+              <array>
+                  <string>${ARCH_STRING}</string>
+              </array>
           </dict>
           </plist>
           EOF
+
+          echo "Info.plist created with architecture: ${ARCH_STRING}"
+          cat NeubiBackup.app/Contents/Info.plist
+
+      - name: Sign app bundle
+        run: |
+          # Ad-hoc sign the entire app bundle (sign after copying binary, not before)
+          codesign --force --deep --sign - NeubiBackup.app
+          echo "App bundle signed successfully"
+          codesign -dv --verbose=4 NeubiBackup.app
+
+          # Verify the signature
+          codesign --verify --verbose NeubiBackup.app
 
       - name: Create DMG installer
         run: |

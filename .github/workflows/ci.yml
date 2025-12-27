@@ -63,14 +63,20 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
         shell: bash
         run: |
           # Set SDKROOT and configure C compiler for macOS cross-compilation
           if [ "${{ matrix.goos }}" = "darwin" ]; then
             export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+            # Set minimum deployment target to avoid "requires macOS 15.0" issues
+            CGO_FLAGS="-mmacosx-version-min=10.15"
             if [ "${{ matrix.goarch }}" = "amd64" ]; then
-              export CGO_CFLAGS="-arch x86_64"
-              export CGO_LDFLAGS="-arch x86_64"
+              export CGO_CFLAGS="-arch x86_64 ${CGO_FLAGS}"
+              export CGO_LDFLAGS="-arch x86_64 ${CGO_FLAGS}"
+            else
+              export CGO_CFLAGS="${CGO_FLAGS}"
+              export CGO_LDFLAGS="${CGO_FLAGS}"
             fi
           fi
           go build -ldflags "-X main.version=${{ github.sha }}" -o ${{ matrix.binary }} .

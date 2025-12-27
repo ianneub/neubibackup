@@ -1,0 +1,71 @@
+# NeubiBackup
+
+Cross-platform backup scheduler wrapping restic. See PROJECT_FILE.md for full specification.
+
+## Tech Stack
+
+- Go 1.25+ with `github.com/getlantern/systray` for tray icon
+- Embedded restic 0.18.1 binary via `//go:embed`
+- YAML config via `gopkg.in/yaml.v3`
+- `github.com/emersion/go-autostart` for launch at login
+
+## Key Features
+
+- Daily scheduled backups with configurable time
+- Missed schedule detection (wake from sleep → check if backup needed)
+- Retry logic: 5 attempts with exponential backoff (1, 2, 4, 8, 16 min)
+- healthchecks.io integration (ping start/success/fail)
+- Pushover notifications on failure
+- Auto-reload config on file change
+
+## Data Directory
+
+All files stored in `~/neubibackup/`:
+
+- `config.yaml` - User configuration
+- `state.yaml` - App-managed state (last backup time, errors)
+- `logs/` - Last 25 backup logs (YYYY-MM-DDTHH-MM-SS.log)
+
+## Project Structure
+
+```text
+internal/
+├── config/      # Load/save YAML config, default paths
+├── scheduler/   # Schedule tracking, "should run now?" logic
+├── restic/      # Binary embedding, extraction, command execution
+├── healthchecks/# Healthchecks.io HTTP client
+├── power/       # Platform-specific wake/sleep detection
+├── tray/        # System tray setup, menu items, status updates
+├── autostart/   # Wrapper around go-autostart
+├── state/       # Backup state tracking
+├── logging/     # Log file management, retention cleanup
+└── pushover/    # Pushover notification API client
+```
+
+## Build Commands
+
+```bash
+# Download restic binaries first
+./scripts/download-restic.sh
+
+# Build for current platform
+go build -o neubibackup .
+
+# Cross-compile
+GOOS=windows GOARCH=amd64 go build -o neubibackup.exe .
+GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
+```
+
+## Platform Notes
+
+### macOS
+
+- Build as `.app` bundle for proper Mac experience
+- Wake detection via `NSWorkspaceDidWakeNotification`
+- Open files with `open` command
+
+### Windows
+
+- Wake detection via `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`
+- Add `--use-fs-snapshot` flag for VSS snapshots
+- Open files with `notepad` command

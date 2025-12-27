@@ -9,27 +9,96 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build
+  build-macos:
+    name: Build macOS
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: macos-latest
-            goos: darwin
             goarch: arm64
-            binary: neubibackup
-            asset_name: neubibackup-darwin-arm64
+            arch_name: arm64
           - os: macos-13
-            goos: darwin
             goarch: amd64
-            binary: neubibackup
-            asset_name: neubibackup-darwin-amd64
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            binary: neubibackup.exe
-            asset_name: neubibackup-windows-amd64.exe
+            arch_name: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Download restic binaries
+        run: ./scripts/download-restic.sh
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build
+        env:
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" -o neubibackup .
+
+      - name: Create app bundle
+        run: |
+          mkdir -p NeubiBackup.app/Contents/MacOS
+          mkdir -p NeubiBackup.app/Contents/Resources
+          cp neubibackup NeubiBackup.app/Contents/MacOS/neubibackup
+          cat > NeubiBackup.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>neubibackup</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.neubibackup.app</string>
+              <key>CFBundleName</key>
+              <string>NeubiBackup</string>
+              <key>CFBundleVersion</key>
+              <string>${{ steps.version.outputs.VERSION }}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${{ steps.version.outputs.VERSION }}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>10.13</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Create DMG installer
+        run: |
+          # Create a temporary directory for DMG contents
+          mkdir -p dmg_contents
+          cp -R NeubiBackup.app dmg_contents/
+
+          # Create a symbolic link to Applications
+          ln -s /Applications dmg_contents/Applications
+
+          # Create the DMG
+          hdiutil create -volname "NeubiBackup" \
+            -srcfolder dmg_contents \
+            -ov -format UDZO \
+            NeubiBackup-${{ matrix.arch_name }}.dmg
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neubibackup-darwin-${{ matrix.arch_name }}-dmg
+          path: NeubiBackup-${{ matrix.arch_name }}.dmg
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -50,59 +119,98 @@ jobs:
 
       - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" -o ${{ matrix.binary }} .
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -H windowsgui" -o neubibackup.exe .
 
-      - name: Create macOS app bundle
-        if: matrix.goos == 'darwin'
+      - name: Create NSIS installer script
+        shell: bash
         run: |
-          mkdir -p NeubiBackup.app/Contents/MacOS
-          mkdir -p NeubiBackup.app/Contents/Resources
-          cp ${{ matrix.binary }} NeubiBackup.app/Contents/MacOS/neubibackup
-          cat > NeubiBackup.app/Contents/Info.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>neubibackup</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.neubibackup.app</string>
-              <key>CFBundleName</key>
-              <string>NeubiBackup</string>
-              <key>CFBundleVersion</key>
-              <string>${{ steps.version.outputs.VERSION }}</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${{ steps.version.outputs.VERSION }}</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>10.13</string>
-              <key>LSUIElement</key>
-              <true/>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-          </dict>
-          </plist>
+          cat > installer.nsi << 'EOF'
+          !include "MUI2.nsh"
+
+          Name "NeubiBackup"
+          OutFile "NeubiBackup-Setup.exe"
+          InstallDir "$PROGRAMFILES64\NeubiBackup"
+          RequestExecutionLevel admin
+
+          !define MUI_ABORTWARNING
+          !define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
+
+          !insertmacro MUI_PAGE_WELCOME
+          !insertmacro MUI_PAGE_DIRECTORY
+          !insertmacro MUI_PAGE_INSTFILES
+          !insertmacro MUI_PAGE_FINISH
+
+          !insertmacro MUI_UNPAGE_CONFIRM
+          !insertmacro MUI_UNPAGE_INSTFILES
+
+          !insertmacro MUI_LANGUAGE "English"
+
+          Section "Install"
+            SetOutPath "$INSTDIR"
+            File "neubibackup.exe"
+
+            ; Create uninstaller
+            WriteUninstaller "$INSTDIR\Uninstall.exe"
+
+            ; Create Start Menu shortcuts
+            CreateDirectory "$SMPROGRAMS\NeubiBackup"
+            CreateShortcut "$SMPROGRAMS\NeubiBackup\NeubiBackup.lnk" "$INSTDIR\neubibackup.exe"
+            CreateShortcut "$SMPROGRAMS\NeubiBackup\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+
+            ; Add to Add/Remove Programs
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeubiBackup" \
+              "DisplayName" "NeubiBackup"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeubiBackup" \
+              "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeubiBackup" \
+              "InstallLocation" "$INSTDIR"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeubiBackup" \
+              "Publisher" "NeubiBackup"
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeubiBackup" \
+              "NoModify" 1
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeubiBackup" \
+              "NoRepair" 1
+          SectionEnd
+
+          Section "Uninstall"
+            Delete "$INSTDIR\neubibackup.exe"
+            Delete "$INSTDIR\Uninstall.exe"
+            RMDir "$INSTDIR"
+
+            ; Remove Start Menu shortcuts
+            Delete "$SMPROGRAMS\NeubiBackup\NeubiBackup.lnk"
+            Delete "$SMPROGRAMS\NeubiBackup\Uninstall.lnk"
+            RMDir "$SMPROGRAMS\NeubiBackup"
+
+            ; Remove from Add/Remove Programs
+            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeubiBackup"
+          SectionEnd
           EOF
-          zip -r ${{ matrix.asset_name }}.zip NeubiBackup.app
 
-      - name: Upload macOS artifact
-        if: matrix.goos == 'darwin'
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.zip
+          name: neubibackup-windows-amd64-installer
+          path: NeubiBackup-Setup.exe
 
-      - name: Upload Windows artifact
-        if: matrix.goos == 'windows'
+      - name: Upload portable exe artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.binary }}
+          name: neubibackup-windows-amd64-portable
+          path: neubibackup.exe
 
   release:
     name: Create Release
-    needs: build
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -116,6 +224,14 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          cp artifacts/neubibackup-darwin-arm64-dmg/NeubiBackup-arm64.dmg release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg
+          cp artifacts/neubibackup-darwin-amd64-dmg/NeubiBackup-amd64.dmg release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.dmg
+          cp artifacts/neubibackup-windows-amd64-installer/NeubiBackup-Setup.exe release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-setup.exe
+          cp artifacts/neubibackup-windows-amd64-portable/neubibackup.exe release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-portable.exe
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -124,6 +240,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            artifacts/neubibackup-darwin-arm64/neubibackup-darwin-arm64.zip
-            artifacts/neubibackup-darwin-amd64/neubibackup-darwin-amd64.zip
-            artifacts/neubibackup-windows-amd64.exe/neubibackup.exe
+            release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg
+            release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.dmg
+            release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-setup.exe
+            release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-portable.exe

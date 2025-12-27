@@ -24,11 +24,26 @@ jobs:
 
       - name: Free disk space
         run: |
-          # Remove unnecessary large directories to free disk space
+          # Aggressively remove unnecessary large directories to free disk space
+          # See: https://github.com/actions/runner-images/issues/2840
+          echo "Before cleanup:"
+          df -h /
+
+          # Remove Xcode (huge, ~15GB)
+          sudo rm -rf /Applications/Xcode*.app || true
+
+          # Remove Android SDK
+          sudo rm -rf ~/Library/Android || true
+
+          # Remove other large tools
           sudo rm -rf /usr/local/share/powershell || true
           sudo rm -rf /usr/local/lib/node_modules || true
           sudo rm -rf /usr/local/.ghcup || true
-          df -h
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo rm -rf ~/hostedtoolcache || true
+
+          echo "After cleanup:"
+          df -h /
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -98,7 +113,14 @@ jobs:
           # Clean up to free disk space before DMG creation
           rm -rf internal/restic
           go clean -cache -modcache || true
-          df -h
+
+          echo "Disk space before DMG creation:"
+          df -h /
+
+          # Get app size for DMG sizing
+          APP_SIZE=$(du -sm NeubiBackup.app | cut -f1)
+          DMG_SIZE=$((APP_SIZE + 10))m
+          echo "App size: ${APP_SIZE}MB, DMG size: ${DMG_SIZE}"
 
           # Create a temporary directory for DMG contents
           mkdir -p dmg_contents
@@ -107,11 +129,21 @@ jobs:
           # Create a symbolic link to Applications
           ln -s /Applications dmg_contents/Applications
 
-          # Create the DMG
+          # Create the DMG using a writable image first, then convert
+          # This approach is more reliable on constrained disk space
           hdiutil create -volname "NeubiBackup" \
             -srcfolder dmg_contents \
-            -ov -format UDZO \
-            NeubiBackup-${{ matrix.arch_name }}.dmg
+            -fs HFS+ \
+            -size ${DMG_SIZE} \
+            -ov -format UDRW \
+            temp.dmg
+
+          # Convert to compressed read-only format
+          hdiutil convert temp.dmg -format UDZO -o NeubiBackup-${{ matrix.arch_name }}.dmg
+          rm -f temp.dmg
+
+          echo "DMG created successfully:"
+          ls -la NeubiBackup-${{ matrix.arch_name }}.dmg
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4

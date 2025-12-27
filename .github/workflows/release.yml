@@ -22,13 +22,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          # Remove unnecessary large directories to free disk space
+          sudo rm -rf /usr/local/share/powershell || true
+          sudo rm -rf /usr/local/lib/node_modules || true
+          sudo rm -rf /usr/local/.ghcup || true
+          df -h
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.25"
 
-      - name: Download restic binaries
-        run: ./scripts/download-restic.sh
+      - name: Download restic binary for macOS
+        run: |
+          RESTIC_VERSION="0.18.1"
+          BINARIES_DIR="internal/restic"
+          mkdir -p "$BINARIES_DIR"
+
+          # Only download the macOS arm64 binary
+          URL="https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_darwin_arm64.bz2"
+          curl -sL "$URL" | bunzip2 > "$BINARIES_DIR/restic_darwin_arm64"
+          chmod +x "$BINARIES_DIR/restic_darwin_arm64"
+
+          # Create a dummy Windows binary to satisfy the embed directive
+          touch "$BINARIES_DIR/restic_windows_amd64.exe"
+
+          ls -la "$BINARIES_DIR/"
 
       - name: Get version from tag
         id: version
@@ -74,6 +95,11 @@ jobs:
 
       - name: Create DMG installer
         run: |
+          # Clean up to free disk space before DMG creation
+          rm -rf internal/restic
+          go clean -cache -modcache || true
+          df -h
+
           # Create a temporary directory for DMG contents
           mkdir -p dmg_contents
           cp -R NeubiBackup.app dmg_contents/

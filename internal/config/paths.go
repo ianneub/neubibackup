@@ -1,0 +1,83 @@
+// Package config handles configuration loading, saving, and path management.
+package config
+
+import (
+	"os"
+	"path/filepath"
+)
+
+const appDirName = "neubibackup"
+
+// GetAppDir returns the path to the application data directory.
+// This is ~/neubibackup/ on all platforms.
+func GetAppDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, appDirName), nil
+}
+
+// GetConfigPath returns the path to the config file.
+func GetConfigPath() (string, error) {
+	appDir, err := GetAppDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(appDir, "config.yaml"), nil
+}
+
+// GetStatePath returns the path to the state file.
+func GetStatePath() (string, error) {
+	appDir, err := GetAppDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(appDir, "state.yaml"), nil
+}
+
+// GetLogsDir returns the path to the logs directory.
+func GetLogsDir() (string, error) {
+	appDir, err := GetAppDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(appDir, "logs"), nil
+}
+
+// EnsureAppDir creates the application directory and logs subdirectory if they don't exist.
+func EnsureAppDir() error {
+	appDir, err := GetAppDir()
+	if err != nil {
+		return err
+	}
+
+	// Create app directory
+	if err := os.MkdirAll(appDir, 0755); err != nil {
+		return err
+	}
+
+	// Create logs subdirectory
+	logsDir, err := GetLogsDir()
+	if err != nil {
+		return err
+	}
+	return os.MkdirAll(logsDir, 0755)
+}
+
+// ConfigExists returns true if the config file exists.
+func ConfigExists() (bool, error) {
+	configPath, err := GetConfigPath()
+	if err != nil {
+		return false, err
+	}
+
+	_, err = os.Stat(configPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}

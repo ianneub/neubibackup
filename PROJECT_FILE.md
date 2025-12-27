@@ -208,7 +208,6 @@ restic_args:
   global: []                 # Args for all commands
   backup: ["--verbose"]      # Args for backup command
   # Hardcoded flags in runner:
-  #   --pack-size 95       (optimal for REST server)
   #   --one-file-system    (don't cross filesystem boundaries)
   #   --exclude-caches     (skip directories with CACHEDIR.TAG)
   #   --use-fs-snapshot    (Windows only: use VSS for consistent snapshots)
@@ -325,7 +324,7 @@ On app start OR on wake from sleep:
 2. Ping healthchecks.io /start endpoint
 3. Extract restic binary if needed
 4. FOR attempt = 1 to 5:
-   a. Execute: restic backup --pack-size 95 --one-file-system --exclude-caches [paths] [args]
+   a. Execute: restic backup [global_args] -r [repository] [excludes] [backup_args] [paths]
    b. Capture stdout/stderr to log buffer
    c. IF success:
       - Ping healthchecks.io success endpoint

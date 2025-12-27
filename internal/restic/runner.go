@@ -117,20 +117,18 @@ func buildBackupArgs(cfg *config.Config) []string {
 		args = append(args, "--exclude-file", cfg.Backup.ExcludeFile)
 	}
 
-	// Backup-specific args
+	// Backup-specific args from config
 	args = append(args, cfg.ResticArgs.Backup...)
 
-	// Add VSS snapshot flag on Windows
+	// Add hardcoded flags if not already present in user config
+	hardcodedFlags := []string{"--one-file-system", "--exclude-caches"}
 	if runtime.GOOS == "windows" {
-		hasVSS := false
-		for _, arg := range cfg.ResticArgs.Backup {
-			if arg == "--use-fs-snapshot" {
-				hasVSS = true
-				break
-			}
-		}
-		if !hasVSS {
-			args = append(args, "--use-fs-snapshot")
+		hardcodedFlags = append(hardcodedFlags, "--use-fs-snapshot")
+	}
+
+	for _, flag := range hardcodedFlags {
+		if !containsArg(cfg.ResticArgs.Backup, flag) {
+			args = append(args, flag)
 		}
 	}
 
@@ -138,6 +136,16 @@ func buildBackupArgs(cfg *config.Config) []string {
 	args = append(args, cfg.Backup.Paths...)
 
 	return args
+}
+
+// containsArg checks if a slice of arguments contains a specific flag.
+func containsArg(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag {
+			return true
+		}
+	}
+	return false
 }
 
 func buildEnv(cfg *config.Config, proxyAddr string) []string {

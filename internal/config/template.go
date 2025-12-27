@@ -53,7 +53,6 @@ restic_args:
   backup:                    # Args for backup command
     - "--verbose"
   # Note: The following flags are always added automatically:
-  #   --pack-size 95       (optimal for REST server)
   #   --one-file-system    (don't cross filesystem boundaries)
   #   --exclude-caches     (skip directories with CACHEDIR.TAG)
   #   --use-fs-snapshot    (Windows only: use VSS for consistent snapshots)

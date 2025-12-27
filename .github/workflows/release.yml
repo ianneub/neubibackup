@@ -187,6 +187,7 @@ jobs:
         env:
           GOOS: windows
           GOARCH: amd64
+          CGO_ENABLED: 1
         run: go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -H windowsgui" -o neubibackup.exe .
 
       - name: Create NSIS installer script

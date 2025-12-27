@@ -15,6 +15,7 @@ neubibackup.exe
 
 # Restic binaries (downloaded, not committed)
 /binaries/
+/internal/restic/restic_*
 
 # IDE
 .idea/

@@ -13,7 +13,7 @@ version: 1
 # Schedule settings
 schedule:
   time: "01:00"              # 24-hour format, local time
-  timezone: ""               # Optional, defaults to system timezone (e.g., "America/New_York")
+  # timezone: ""             # Optional, defaults to system timezone (e.g., "America/New_York")
 
 # Restic repository settings
 repository:
@@ -23,10 +23,13 @@ repository:
   # Local repository example:
   # path: "/path/to/backup/repo"
 
-  # Password file (recommended):
-  password_file: ""
+  # Password (enter directly - note: less secure than other options):
+  # password: "your-restic-password"
 
-  # Or use a command to get the password:
+  # Or use a password file:
+  # password_file: "/path/to/password-file"
+
+  # Or use a command to get the password (most secure):
   # macOS Keychain example:
   # password_command: "security find-generic-password -s neubibackup -w"
   # Windows Credential Manager example:

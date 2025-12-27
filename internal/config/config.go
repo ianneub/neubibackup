@@ -33,6 +33,7 @@ type ScheduleConfig struct {
 // RepositoryConfig defines the restic repository settings.
 type RepositoryConfig struct {
 	Path            string `yaml:"path"`             // Repository path or URL
+	Password        string `yaml:"password"`         // Password directly (less secure)
 	PasswordFile    string `yaml:"password_file"`    // Path to password file
 	PasswordCommand string `yaml:"password_command"` // Command to get password
 }
@@ -118,8 +119,8 @@ func (c *Config) Validate() error {
 	if c.Repository.Path == "" {
 		return fmt.Errorf("repository.path is required")
 	}
-	if c.Repository.PasswordFile == "" && c.Repository.PasswordCommand == "" {
-		return fmt.Errorf("repository.password_file or repository.password_command is required")
+	if c.Repository.Password == "" && c.Repository.PasswordFile == "" && c.Repository.PasswordCommand == "" {
+		return fmt.Errorf("repository.password, repository.password_file, or repository.password_command is required")
 	}
 	if len(c.Backup.Paths) == 0 {
 		return fmt.Errorf("backup.paths is required")

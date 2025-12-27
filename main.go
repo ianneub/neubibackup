@@ -45,9 +45,10 @@ var (
 	backupCancel  context.CancelFunc
 
 	// Menu items for dynamic updates
-	mStatus     *systray.MenuItem
-	mBackupNow  *systray.MenuItem
-	mAutostart  *systray.MenuItem
+	mStatus      *systray.MenuItem
+	mBackupNow   *systray.MenuItem
+	mStopBackup  *systray.MenuItem
+	mAutostart   *systray.MenuItem
 )
 
 func main() {
@@ -157,6 +158,10 @@ func setupMenu() {
 		mBackupNow.Disable()
 	}
 
+	// Stop Backup (hidden by default)
+	mStopBackup = systray.AddMenuItem("Stop Backup", "Stop the running backup")
+	mStopBackup.Hide()
+
 	systray.AddSeparator()
 
 	// Open Config File
@@ -186,6 +191,9 @@ func setupMenu() {
 			select {
 			case <-mBackupNow.ClickedCh:
 				triggerBackupNow()
+
+			case <-mStopBackup.ClickedCh:
+				stopBackup()
 
 			case <-mAutostart.ClickedCh:
 				toggleAutostart()
@@ -251,6 +259,21 @@ func triggerBackupNow() {
 	}()
 }
 
+func stopBackup() {
+	backupMu.Lock()
+	defer backupMu.Unlock()
+
+	if !backupRunning {
+		log.Println("No backup running")
+		return
+	}
+
+	if backupCancel != nil {
+		log.Println("Stopping backup...")
+		backupCancel()
+	}
+}
+
 func runBackup() {
 	backupMu.Lock()
 	backupRunning = true
@@ -267,16 +290,26 @@ func runBackup() {
 		updateIcon()
 	}()
 
-	// Update UI
+	// Update UI - show Stop Backup, hide Backup Now
 	updateStatus()
 	updateIcon()
 	if mBackupNow != nil {
-		mBackupNow.Disable()
+		mBackupNow.Hide()
+	}
+	if mStopBackup != nil {
+		mStopBackup.Show()
 	}
 
 	defer func() {
-		if mBackupNow != nil && cfg != nil && cfg.IsConfigured() {
-			mBackupNow.Enable()
+		// Restore menu - show Backup Now, hide Stop Backup
+		if mStopBackup != nil {
+			mStopBackup.Hide()
+		}
+		if mBackupNow != nil {
+			mBackupNow.Show()
+			if cfg != nil && cfg.IsConfigured() {
+				mBackupNow.Enable()
+			}
 		}
 	}()
 

@@ -21,9 +21,10 @@ var (
 // RunBackup executes a restic backup with retry logic.
 // It writes output to the provided writer and returns an error only if all retries fail.
 // On the first attempt, it will initialize the repository if it doesn't exist.
-func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer) error {
+// If proxyAddr is non-empty, HTTP_PROXY and HTTPS_PROXY will be set to route through it.
+func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string) error {
 	// Check if repository exists, initialize if needed
-	if err := ensureRepositoryExists(ctx, cfg, logWriter); err != nil {
+	if err := ensureRepositoryExists(ctx, cfg, logWriter, proxyAddr); err != nil {
 		return fmt.Errorf("ensure repository exists: %w", err)
 	}
 
@@ -42,7 +43,7 @@ func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer) err
 			}
 		}
 
-		err := runBackupOnce(ctx, cfg, logWriter)
+		err := runBackupOnce(ctx, cfg, logWriter, proxyAddr)
 		if err == nil {
 			return nil // Success
 		}
@@ -59,7 +60,7 @@ func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer) err
 	return fmt.Errorf("backup failed after %d attempts: %w", MaxRetries, lastErr)
 }
 
-func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer) error {
+func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string) error {
 	binaryPath, err := GetBinaryPath()
 	if err != nil {
 		return fmt.Errorf("get restic binary: %w", err)
@@ -74,7 +75,7 @@ func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer)
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 
 	// Set environment
-	cmd.Env = append(os.Environ(), buildEnv(cfg)...)
+	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 
 	// Capture output
 	cmd.Stdout = logWriter
@@ -139,7 +140,7 @@ func buildBackupArgs(cfg *config.Config) []string {
 	return args
 }
 
-func buildEnv(cfg *config.Config) []string {
+func buildEnv(cfg *config.Config, proxyAddr string) []string {
 	var env []string
 
 	// Set RESTIC_REPOSITORY if not using -r flag
@@ -151,11 +152,18 @@ func buildEnv(cfg *config.Config) []string {
 		env = append(env, "RESTIC_PASSWORD="+cfg.Repository.Password)
 	}
 
+	// Route through Tailscale SOCKS5 proxy if provided
+	if proxyAddr != "" {
+		env = append(env, "HTTP_PROXY=socks5://"+proxyAddr)
+		env = append(env, "HTTPS_PROXY=socks5://"+proxyAddr)
+	}
+
 	return env
 }
 
 // RunCommand runs an arbitrary restic command (for testing, init, etc).
-func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, command string, extraArgs ...string) error {
+// If proxyAddr is non-empty, HTTP_PROXY and HTTPS_PROXY will be set.
+func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string, command string, extraArgs ...string) error {
 	binaryPath, err := GetBinaryPath()
 	if err != nil {
 		return fmt.Errorf("get restic binary: %w", err)
@@ -174,7 +182,7 @@ func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, co
 	args = append(args, extraArgs...)
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	cmd.Env = append(os.Environ(), buildEnv(cfg)...)
+	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 	cmd.Stdout = logWriter
 	cmd.Stderr = logWriter
 
@@ -182,7 +190,7 @@ func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, co
 }
 
 // ensureRepositoryExists checks if the repository exists and initializes it if not.
-func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter io.Writer) error {
+func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string) error {
 	binaryPath, err := GetBinaryPath()
 	if err != nil {
 		return fmt.Errorf("get restic binary: %w", err)
@@ -200,7 +208,7 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 	}
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	cmd.Env = append(os.Environ(), buildEnv(cfg)...)
+	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 
 	// Run silently - we only care about exit code
 	err = cmd.Run()
@@ -223,7 +231,7 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 	}
 
 	initCmd := exec.CommandContext(ctx, binaryPath, initArgs...)
-	initCmd.Env = append(os.Environ(), buildEnv(cfg)...)
+	initCmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 	initCmd.Stdout = logWriter
 	initCmd.Stderr = logWriter
 

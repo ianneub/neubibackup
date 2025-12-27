@@ -22,6 +22,8 @@ type Config struct {
 	Healthchecks HealthchecksConfig `yaml:"healthchecks"`
 
 	Pushover PushoverConfig `yaml:"pushover"`
+
+	Tailscale TailscaleConfig `yaml:"tailscale"`
 }
 
 // ScheduleConfig defines when backups should run.
@@ -65,6 +67,14 @@ type PushoverConfig struct {
 	APIToken  string `yaml:"api_token"`
 	OnSuccess bool   `yaml:"on_success"`
 	OnFailure bool   `yaml:"on_failure"`
+}
+
+// TailscaleConfig defines Tailscale network settings for accessing private repositories.
+type TailscaleConfig struct {
+	Enabled   bool   `yaml:"enabled"`    // Enable Tailscale connectivity
+	AuthKey   string `yaml:"auth_key"`   // Tailscale auth key (tskey-auth-xxx or reusable key)
+	Hostname  string `yaml:"hostname"`   // Node name in tailnet (defaults to "neubibackup")
+	Ephemeral bool   `yaml:"ephemeral"`  // Register as ephemeral node (auto-cleanup on exit)
 }
 
 // Load reads the config from the default config file.
@@ -137,4 +147,9 @@ func (c *Config) IsConfigured() bool {
 	return c.Repository.Path != "" &&
 		c.Repository.Path != "rest:https://user:pass@backup.example.com/repo" &&
 		len(c.Backup.Paths) > 0
+}
+
+// IsTailscaleEnabled returns true if Tailscale is configured and enabled.
+func (c *Config) IsTailscaleEnabled() bool {
+	return c.Tailscale.Enabled && c.Tailscale.AuthKey != ""
 }

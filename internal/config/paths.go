@@ -45,6 +45,15 @@ func GetLogsDir() (string, error) {
 	return filepath.Join(appDir, "logs"), nil
 }
 
+// GetTailscaleDir returns the path to the Tailscale state directory.
+func GetTailscaleDir() (string, error) {
+	appDir, err := GetAppDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(appDir, "tailscale"), nil
+}
+
 // EnsureAppDir creates the application directory and logs subdirectory if they don't exist.
 func EnsureAppDir() error {
 	appDir, err := GetAppDir()

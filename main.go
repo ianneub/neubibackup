@@ -17,6 +17,7 @@ import (
 	"neubibackup/internal/restic"
 	"neubibackup/internal/scheduler"
 	"neubibackup/internal/state"
+	"neubibackup/internal/tailscale"
 	"neubibackup/internal/tray"
 
 	"github.com/fsnotify/fsnotify"
@@ -34,6 +35,7 @@ var (
 	autostartMgr  *autostart.Manager
 	powerWatcher  *power.Watcher
 	configWatcher *fsnotify.Watcher
+	tailscaleMgr  *tailscale.Manager
 
 	// Context for graceful shutdown
 	appCtx    context.Context
@@ -101,6 +103,13 @@ func onReady() {
 	// Start config file watcher
 	go watchConfigFile()
 
+	// Initialize Tailscale if configured
+	if cfg != nil && cfg.IsTailscaleEnabled() {
+		if err := initTailscale(); err != nil {
+			log.Printf("Warning: Tailscale initialization failed: %v", err)
+		}
+	}
+
 	// Initialize scheduler if configured
 	if cfg != nil && cfg.IsConfigured() {
 		initScheduler()
@@ -109,6 +118,26 @@ func onReady() {
 	// Start power watcher
 	powerWatcher = power.New(onSystemWake)
 	powerWatcher.Start()
+}
+
+func initTailscale() error {
+	tsDir, err := config.GetTailscaleDir()
+	if err != nil {
+		return err
+	}
+
+	tailscaleMgr, err = tailscale.New(&cfg.Tailscale, tsDir)
+	if err != nil {
+		return err
+	}
+
+	// Start with a timeout
+	if err := tailscaleMgr.Start(appCtx); err != nil {
+		tailscaleMgr = nil
+		return err
+	}
+
+	return nil
 }
 
 func handleFirstRun() error {
@@ -343,8 +372,17 @@ func runBackup() {
 	// Record attempt time
 	appState.LastBackupAttempt = appState.LastBackupSuccess // Will be updated after
 
+	// Get Tailscale proxy address if available
+	var proxyAddr string
+	if tailscaleMgr != nil && tailscaleMgr.IsStarted() {
+		proxyAddr = tailscaleMgr.ProxyAddr()
+		if proxyAddr != "" {
+			log.Printf("Using Tailscale proxy: %s", proxyAddr)
+		}
+	}
+
 	// Run backup
-	err = restic.RunBackup(ctx, cfg, logWriter)
+	err = restic.RunBackup(ctx, cfg, logWriter, proxyAddr)
 
 	if err != nil {
 		log.Printf("Backup failed: %v", err)
@@ -502,6 +540,8 @@ func reloadConfig() {
 	}
 	backupMu.Unlock()
 
+	oldTsEnabled := cfg != nil && cfg.IsTailscaleEnabled()
+
 	newCfg, err := config.Load()
 	if err != nil {
 		log.Printf("Error reloading config: %v", err)
@@ -509,6 +549,24 @@ func reloadConfig() {
 	}
 
 	cfg = newCfg
+	newTsEnabled := cfg.IsTailscaleEnabled()
+
+	// Handle Tailscale config changes
+	if !oldTsEnabled && newTsEnabled {
+		// Tailscale newly enabled
+		log.Println("Tailscale enabled, initializing...")
+		if err := initTailscale(); err != nil {
+			log.Printf("Warning: Tailscale initialization failed: %v", err)
+		}
+	} else if oldTsEnabled && !newTsEnabled {
+		// Tailscale disabled
+		log.Println("Tailscale disabled, shutting down...")
+		if tailscaleMgr != nil {
+			tailscaleMgr.Close()
+			tailscaleMgr = nil
+		}
+	}
+	// Note: Auth key changes require app restart
 
 	// Update scheduler if it exists
 	if sched != nil {
@@ -550,6 +608,13 @@ func onExit() {
 		backupCancel()
 	}
 	backupMu.Unlock()
+
+	// Close Tailscale
+	if tailscaleMgr != nil {
+		if err := tailscaleMgr.Close(); err != nil {
+			log.Printf("Warning: Tailscale shutdown error: %v", err)
+		}
+	}
 
 	// Stop power watcher
 	if powerWatcher != nil {

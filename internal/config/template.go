@@ -72,6 +72,19 @@ pushover:
   on_success: false          # Notify on successful backup
   on_failure: true           # Notify on failed backup
 
+# Tailscale integration (optional)
+# Enable this to access restic REST servers that are only reachable via Tailscale.
+tailscale:
+  enabled: false
+  # Auth key for headless login (get from https://login.tailscale.com/admin/settings/keys)
+  # Use a reusable key for long-term operation.
+  auth_key: ""
+  # Hostname for this device in your tailnet (defaults to "neubibackup")
+  hostname: "neubibackup"
+  # Ephemeral mode: device is removed from tailnet when app closes
+  # Recommended: false (keeps device registered for easier management)
+  ephemeral: false
+
 # Note: state.yaml and logs/ are stored in ~/neubibackup/ alongside this config
 `
 

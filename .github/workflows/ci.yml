@@ -65,9 +65,13 @@ jobs:
           CGO_ENABLED: 1
         shell: bash
         run: |
-          # Set SDKROOT for macOS cross-compilation
+          # Set SDKROOT and configure C compiler for macOS cross-compilation
           if [ "${{ matrix.goos }}" = "darwin" ]; then
             export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+            if [ "${{ matrix.goarch }}" = "amd64" ]; then
+              export CGO_CFLAGS="-arch x86_64"
+              export CGO_LDFLAGS="-arch x86_64"
+            fi
           fi
           go build -ldflags "-X main.version=${{ github.sha }}" -o ${{ matrix.binary }} .
 

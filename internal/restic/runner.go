@@ -20,7 +20,13 @@ var (
 
 // RunBackup executes a restic backup with retry logic.
 // It writes output to the provided writer and returns an error only if all retries fail.
+// On the first attempt, it will initialize the repository if it doesn't exist.
 func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer) error {
+	// Check if repository exists, initialize if needed
+	if err := ensureRepositoryExists(ctx, cfg, logWriter); err != nil {
+		return fmt.Errorf("ensure repository exists: %w", err)
+	}
+
 	var lastErr error
 
 	for attempt := 0; attempt < MaxRetries; attempt++ {
@@ -173,4 +179,61 @@ func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, co
 	cmd.Stderr = logWriter
 
 	return cmd.Run()
+}
+
+// ensureRepositoryExists checks if the repository exists and initializes it if not.
+func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter io.Writer) error {
+	binaryPath, err := GetBinaryPath()
+	if err != nil {
+		return fmt.Errorf("get restic binary: %w", err)
+	}
+
+	// Build args for "snapshots" command to check if repo exists
+	args := []string{"snapshots", "--json"}
+	args = append(args, cfg.ResticArgs.Global...)
+	args = append(args, "-r", cfg.Repository.Path)
+
+	if cfg.Repository.PasswordFile != "" {
+		args = append(args, "--password-file", cfg.Repository.PasswordFile)
+	} else if cfg.Repository.PasswordCommand != "" {
+		args = append(args, "--password-command", cfg.Repository.PasswordCommand)
+	}
+
+	cmd := exec.CommandContext(ctx, binaryPath, args...)
+	cmd.Env = append(os.Environ(), buildEnv(cfg)...)
+
+	// Run silently - we only care about exit code
+	err = cmd.Run()
+	if err == nil {
+		// Repository exists
+		return nil
+	}
+
+	// Repository doesn't exist or is inaccessible - try to initialize
+	fmt.Fprintf(logWriter, "Repository not found, initializing...\n")
+
+	initArgs := []string{"init"}
+	initArgs = append(initArgs, cfg.ResticArgs.Global...)
+	initArgs = append(initArgs, "-r", cfg.Repository.Path)
+
+	if cfg.Repository.PasswordFile != "" {
+		initArgs = append(initArgs, "--password-file", cfg.Repository.PasswordFile)
+	} else if cfg.Repository.PasswordCommand != "" {
+		initArgs = append(initArgs, "--password-command", cfg.Repository.PasswordCommand)
+	}
+
+	initCmd := exec.CommandContext(ctx, binaryPath, initArgs...)
+	initCmd.Env = append(os.Environ(), buildEnv(cfg)...)
+	initCmd.Stdout = logWriter
+	initCmd.Stderr = logWriter
+
+	if err := initCmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("restic init exited with code %d", exitErr.ExitCode())
+		}
+		return fmt.Errorf("restic init failed: %w", err)
+	}
+
+	fmt.Fprintf(logWriter, "Repository initialized successfully\n\n")
+	return nil
 }

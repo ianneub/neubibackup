@@ -494,6 +494,14 @@ func watchConfigFile() {
 }
 
 func reloadConfig() {
+	// Stop any running backup before reloading config
+	backupMu.Lock()
+	if backupRunning && backupCancel != nil {
+		log.Println("Stopping running backup due to config change...")
+		backupCancel()
+	}
+	backupMu.Unlock()
+
 	newCfg, err := config.Load()
 	if err != nil {
 		log.Printf("Error reloading config: %v", err)

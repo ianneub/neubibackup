@@ -18,6 +18,9 @@ jobs:
           - os: macos-latest
             goarch: arm64
             arch_name: arm64
+          - os: macos-14-large
+            goarch: amd64
+            arch_name: amd64
 
     steps:
       - uses: actions/checkout@v4
@@ -56,13 +59,19 @@ jobs:
           BINARIES_DIR="internal/restic"
           mkdir -p "$BINARIES_DIR"
 
-          # Only download the macOS arm64 binary
-          URL="https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_darwin_arm64.bz2"
-          curl -sL "$URL" | bunzip2 > "$BINARIES_DIR/restic_darwin_arm64"
-          chmod +x "$BINARIES_DIR/restic_darwin_arm64"
+          # Download the correct macOS binary for this architecture
+          URL="https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_darwin_${{ matrix.goarch }}.bz2"
+          curl -sL "$URL" | bunzip2 > "$BINARIES_DIR/restic_darwin_${{ matrix.goarch }}"
+          chmod +x "$BINARIES_DIR/restic_darwin_${{ matrix.goarch }}"
 
-          # Create a dummy Windows binary to satisfy the embed directive
+          # Create dummy files for other platforms to satisfy embed directives
           touch "$BINARIES_DIR/restic_windows_amd64.exe"
+          # Create dummy for the other macOS arch
+          if [ "${{ matrix.goarch }}" = "arm64" ]; then
+            touch "$BINARIES_DIR/restic_darwin_amd64"
+          else
+            touch "$BINARIES_DIR/restic_darwin_arm64"
+          fi
 
           ls -la "$BINARIES_DIR/"
 
@@ -283,6 +292,7 @@ jobs:
         run: |
           mkdir -p release
           cp artifacts/neubibackup-darwin-arm64-dmg/NeubiBackup-arm64.dmg release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg
+          cp artifacts/neubibackup-darwin-amd64-dmg/NeubiBackup-amd64.dmg release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.dmg
           cp artifacts/neubibackup-windows-amd64-installer/NeubiBackup-Setup.exe release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-setup.exe
           cp artifacts/neubibackup-windows-amd64-portable/neubibackup.exe release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-portable.exe
 
@@ -295,5 +305,6 @@ jobs:
           generate_release_notes: true
           files: |
             release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg
+            release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.dmg
             release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-setup.exe
             release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-portable.exe

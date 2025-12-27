@@ -13,6 +13,7 @@ mkdir -p "$BINARIES_DIR"
 # Platforms to download
 PLATFORMS=(
     "darwin_arm64"
+    "darwin_amd64"
     "windows_amd64"
 )
 

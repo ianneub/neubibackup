@@ -37,6 +37,10 @@ jobs:
             goos: darwin
             goarch: arm64
             binary: neubibackup
+          - os: macos-14-large
+            goos: darwin
+            goarch: amd64
+            binary: neubibackup
           - os: windows-latest
             goos: windows
             goarch: amd64

@@ -27,7 +27,13 @@ Download the latest release for your platform:
 
 1. Download the `.dmg` file
 2. Open it and drag NeubiBackup to Applications
-3. On first launch, you may need to allow it in System Settings > Privacy & Security
+3. Remove the quarantine attribute (required for unsigned apps):
+
+   ```bash
+   xattr -d com.apple.quarantine /Applications/NeubiBackup.app
+   ```
+
+4. On first launch, you may need to allow it in System Settings > Privacy & Security
 
 ### Windows
 

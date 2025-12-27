@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"neubibackup/internal/restic"
 	"neubibackup/internal/state"
 )
 
@@ -62,6 +63,53 @@ func formatDuration(d time.Duration) string {
 		return "1 day ago"
 	}
 	return fmt.Sprintf("%d days ago", days)
+}
+
+// FormatProgress returns a human-readable progress string for the status menu.
+// Shows percentage and bytes processed (e.g., "Backup: 45% (2.3 GB / 5.1 GB)").
+func FormatProgress(p *restic.BackupProgress) string {
+	if p == nil {
+		return "Backup running..."
+	}
+
+	pct := int(p.PercentDone * 100)
+
+	// Full progress with bytes if available
+	if p.TotalBytes > 0 && p.PercentDone > 0 {
+		return fmt.Sprintf("Backup: %d%% (%s / %s)",
+			pct,
+			formatBytes(p.BytesProcessed),
+			formatBytes(p.TotalBytes))
+	}
+
+	// File count progress if bytes not available
+	if p.TotalFiles > 0 && p.FilesProcessed > 0 {
+		return fmt.Sprintf("Backup: %d%% (%d files)",
+			pct,
+			p.FilesProcessed)
+	}
+
+	// Percentage only
+	if p.PercentDone > 0 {
+		return fmt.Sprintf("Backup: %d%%", pct)
+	}
+
+	// Scanning phase (no percentage yet)
+	return "Backup: Scanning files..."
+}
+
+// formatBytes converts bytes to a human-readable string.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // FormatNextBackup returns a human-readable string for the next backup time.

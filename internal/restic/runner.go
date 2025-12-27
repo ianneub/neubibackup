@@ -22,7 +22,8 @@ var (
 // It writes output to the provided writer and returns an error only if all retries fail.
 // On the first attempt, it will initialize the repository if it doesn't exist.
 // If proxyAddr is non-empty, HTTP_PROXY and HTTPS_PROXY will be set to route through it.
-func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string) error {
+// If progressCb is non-nil, it will be called with progress updates during backup.
+func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string, progressCb ProgressCallback) error {
 	// Check if repository exists, initialize if needed
 	if err := ensureRepositoryExists(ctx, cfg, logWriter, proxyAddr); err != nil {
 		return fmt.Errorf("ensure repository exists: %w", err)
@@ -43,7 +44,7 @@ func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer, pro
 			}
 		}
 
-		err := runBackupOnce(ctx, cfg, logWriter, proxyAddr)
+		err := runBackupOnce(ctx, cfg, logWriter, proxyAddr, progressCb)
 		if err == nil {
 			return nil // Success
 		}
@@ -60,7 +61,7 @@ func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer, pro
 	return fmt.Errorf("backup failed after %d attempts: %w", MaxRetries, lastErr)
 }
 
-func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string) error {
+func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string, progressCb ProgressCallback) error {
 	binaryPath, err := GetBinaryPath()
 	if err != nil {
 		return fmt.Errorf("get restic binary: %w", err)
@@ -77,8 +78,12 @@ func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer,
 	// Set environment
 	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 
-	// Capture output
-	cmd.Stdout = logWriter
+	// Capture output - wrap with progress writer if callback provided
+	var stdoutWriter io.Writer = logWriter
+	if progressCb != nil {
+		stdoutWriter = NewProgressWriter(logWriter, progressCb, 500*time.Millisecond)
+	}
+	cmd.Stdout = stdoutWriter
 	cmd.Stderr = logWriter
 
 	err = cmd.Run()
@@ -100,7 +105,7 @@ func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer,
 }
 
 func buildBackupArgs(cfg *config.Config) []string {
-	args := []string{"backup"}
+	args := []string{"backup", "--json"}
 
 	// Add global args
 	args = append(args, cfg.ResticArgs.Global...)

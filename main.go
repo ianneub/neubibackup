@@ -42,9 +42,10 @@ var (
 	appCancel context.CancelFunc
 
 	// Backup state
-	backupMu      sync.Mutex
-	backupRunning bool
-	backupCancel  context.CancelFunc
+	backupMu       sync.Mutex
+	backupRunning  bool
+	backupCancel   context.CancelFunc
+	backupProgress *restic.BackupProgress
 
 	// Menu items for dynamic updates
 	mStatus      *systray.MenuItem
@@ -314,6 +315,7 @@ func runBackup() {
 		backupMu.Lock()
 		backupRunning = false
 		backupCancel = nil
+		backupProgress = nil
 		backupMu.Unlock()
 		updateStatus()
 		updateIcon()
@@ -381,8 +383,16 @@ func runBackup() {
 		}
 	}
 
+	// Progress callback for UI updates
+	onProgress := func(progress restic.BackupProgress) {
+		backupMu.Lock()
+		backupProgress = &progress
+		backupMu.Unlock()
+		updateStatus()
+	}
+
 	// Run backup
-	err = restic.RunBackup(ctx, cfg, logWriter, proxyAddr)
+	err = restic.RunBackup(ctx, cfg, logWriter, proxyAddr, onProgress)
 
 	if err != nil {
 		log.Printf("Backup failed: %v", err)
@@ -443,9 +453,23 @@ func recordFailure(err error, hc *healthchecks.Client) {
 }
 
 func updateStatus() {
-	if mStatus != nil {
-		mStatus.SetTitle(tray.FormatStatus(appState, backupRunning))
+	if mStatus == nil {
+		return
 	}
+
+	backupMu.Lock()
+	running := backupRunning
+	progress := backupProgress
+	backupMu.Unlock()
+
+	var title string
+	if running && progress != nil {
+		title = tray.FormatProgress(progress)
+	} else {
+		title = tray.FormatStatus(appState, running)
+	}
+
+	mStatus.SetTitle(title)
 }
 
 func updateIcon() {

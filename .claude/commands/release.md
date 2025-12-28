@@ -54,7 +54,7 @@ Create a new release for NeubiBackup following semantic versioning.
    - Bug Fixes (fix:)
    - Other changes
 
-3. **Update the GitHub release**: Use `gh release edit v<new-version> --notes "<generated-notes>"` to add the release description.
+3. **Update the GitHub release**: Use `gh release edit v<new-version> --notes "<generated-notes>"` to add the release description. **IMPORTANT**: Do NOT use bash's `cat` command or heredocs. Simply pass the release notes directly as a quoted string argument to `--notes`.
 
 4. **Provide the release URL**: Display `https://github.com/ianneub/neubibackup/releases/tag/v<new-version>` for the user.
 

@@ -11,6 +11,7 @@ A simple system tray application that automatically backs up your files using [r
 - **Progress display** - See real-time progress during backups
 - **Monitoring integrations** - Optional healthchecks.io and Pushover notifications
 - **No restic installation required** - Restic is bundled with the app
+- **Automatic updates** - Get notified when new versions are available and update with one click
 
 ## Supported Platforms
 
@@ -122,6 +123,7 @@ Click the tray icon to access:
 - **Open Config File** - Edit your configuration
 - **Open Logs Folder** - View backup logs
 - **Start at Login** - Toggle automatic startup
+- **Check for Updates** - Check for and install new versions
 
 ### Icon Status
 
@@ -165,6 +167,24 @@ The app detects missed backups when:
 - No successful backup exists for today
 
 Make sure the app is set to **Start at Login** for reliable scheduling.
+
+## Automatic Updates
+
+NeubiBackup checks for updates automatically every 24 hours and on startup. When a new version is available:
+
+1. The menu will show **"Update Available (vX.Y.Z)"**
+2. Click the menu item to download and install the update
+3. The app will restart automatically with the new version
+
+### macOS Note
+
+After updating, macOS Gatekeeper may block the app because it's not code-signed. If this happens, run:
+
+```bash
+xattr -d com.apple.quarantine /Applications/NeubiBackup.app
+```
+
+Then relaunch the app.
 
 ## License
 

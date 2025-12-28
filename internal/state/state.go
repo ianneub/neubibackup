@@ -17,6 +17,9 @@ type State struct {
 	LastBackupSuccess   time.Time `yaml:"last_backup_success"`
 	LastBackupError     string    `yaml:"last_backup_error"`
 	ConsecutiveFailures int       `yaml:"consecutive_failures"`
+
+	// Update tracking
+	LastUpdateCheck time.Time `yaml:"last_update_check,omitempty"`
 }
 
 // Load reads the state from the default state file.

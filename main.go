@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"neubibackup/internal/state"
 	"neubibackup/internal/tailscale"
 	"neubibackup/internal/tray"
+	"neubibackup/internal/updater"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/getlantern/systray"
@@ -50,10 +52,16 @@ var (
 	backupProgress *restic.BackupProgress
 
 	// Menu items for dynamic updates
-	mStatus      *systray.MenuItem
-	mBackupNow   *systray.MenuItem
-	mStopBackup  *systray.MenuItem
-	mAutostart   *systray.MenuItem
+	mStatus       *systray.MenuItem
+	mBackupNow    *systray.MenuItem
+	mStopBackup   *systray.MenuItem
+	mAutostart    *systray.MenuItem
+	mUpdateStatus *systray.MenuItem
+
+	// Updater state
+	appUpdater       *updater.Updater
+	availableVersion string
+	updateTicker     *time.Ticker
 )
 
 func main() {
@@ -131,6 +139,25 @@ func onReady() {
 				return
 			case <-statusTicker.C:
 				updateStatus()
+			}
+		}
+	}()
+
+	// Initialize updater (TODO: replace with actual repo owner/name)
+	appUpdater = updater.New(version, "neubibackup", "neubibackup_go")
+
+	// Check for updates on startup if needed
+	go checkForUpdatesIfNeeded()
+
+	// Start background update checker (every 24 hours)
+	updateTicker = time.NewTicker(24 * time.Hour)
+	go func() {
+		for {
+			select {
+			case <-appCtx.Done():
+				return
+			case <-updateTicker.C:
+				checkForUpdates()
 			}
 		}
 	}()
@@ -223,6 +250,9 @@ func setupMenu() {
 
 	systray.AddSeparator()
 
+	// Update status
+	mUpdateStatus = systray.AddMenuItem("Check for Updates", "Check for new versions")
+
 	// Version
 	mVersion := systray.AddMenuItem("Version "+version+" (restic "+restic.Version+")", "")
 	mVersion.Disable()
@@ -261,6 +291,15 @@ func setupMenu() {
 				}
 				if err := config.OpenFolder(logsDir); err != nil {
 					log.Printf("Error opening logs folder: %v", err)
+				}
+
+			case <-mUpdateStatus.ClickedCh:
+				if availableVersion != "" {
+					// User clicked to install update
+					go installUpdate()
+				} else {
+					// User clicked to check for updates
+					go manualUpdateCheck()
 				}
 
 			case <-mQuit.ClickedCh:
@@ -633,6 +672,86 @@ func reloadConfig() {
 	log.Println("Config reloaded successfully")
 }
 
+// Update checking functions
+
+func checkForUpdatesIfNeeded() {
+	// Skip if we checked recently (within 24 hours)
+	if time.Since(appState.LastUpdateCheck) < 24*time.Hour {
+		log.Println("Skipping update check - checked recently")
+		return
+	}
+	checkForUpdates()
+}
+
+func manualUpdateCheck() {
+	mUpdateStatus.SetTitle("Checking for updates...")
+	mUpdateStatus.Disable()
+
+	checkForUpdates()
+
+	// Re-enable the menu item if no update was found
+	if availableVersion == "" {
+		mUpdateStatus.SetTitle("Check for Updates")
+		mUpdateStatus.Enable()
+	}
+}
+
+func checkForUpdates() {
+	log.Println("Checking for updates...")
+
+	newVersion, available, err := appUpdater.CheckForUpdate(appCtx)
+	if err != nil {
+		log.Printf("Update check failed: %v", err)
+		return
+	}
+
+	// Record the check time
+	appState.LastUpdateCheck = time.Now()
+	if err := appState.Save(); err != nil {
+		log.Printf("Error saving state: %v", err)
+	}
+
+	if available {
+		availableVersion = newVersion
+		mUpdateStatus.SetTitle(fmt.Sprintf("Update Available (%s)", newVersion))
+		mUpdateStatus.Enable()
+		log.Printf("Update available: %s", newVersion)
+	} else {
+		log.Println("No update available")
+	}
+}
+
+func installUpdate() {
+	// Prevent update during backup
+	backupMu.Lock()
+	if backupRunning {
+		backupMu.Unlock()
+		log.Println("Cannot update while backup is running")
+		mUpdateStatus.SetTitle("Update blocked - backup running")
+		return
+	}
+	backupMu.Unlock()
+
+	mUpdateStatus.SetTitle("Downloading update...")
+	mUpdateStatus.Disable()
+
+	log.Printf("Installing update to %s...", availableVersion)
+
+	if err := appUpdater.DownloadAndApply(appCtx); err != nil {
+		log.Printf("Update failed: %v", err)
+		mUpdateStatus.SetTitle("Update failed - click to retry")
+		mUpdateStatus.Enable()
+		return
+	}
+
+	// Update succeeded - the app should restart
+	log.Println("Update installed successfully, restarting...")
+	mUpdateStatus.SetTitle("Update installed - restarting...")
+
+	// Quit the app so it can restart with the new version
+	systray.Quit()
+}
+
 func onExit() {
 	log.Println("NeubiBackup exiting...")
 
@@ -668,5 +787,10 @@ func onExit() {
 	// Stop status ticker
 	if statusTicker != nil {
 		statusTicker.Stop()
+	}
+
+	// Stop update ticker
+	if updateTicker != nil {
+		updateTicker.Stop()
 	}
 }

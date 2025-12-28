@@ -69,3 +69,12 @@ GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 - Wake detection via `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`
 - Add `--use-fs-snapshot` flag for VSS snapshots
 - Open files with `notepad` command
+
+## Documentation
+
+When adding new features or making user-facing changes, always update the README.md file to reflect those changes. This includes:
+
+- New features in the Features section
+- New menu items in the Tray Menu Options section
+- New configuration options with examples
+- Troubleshooting information for common issues

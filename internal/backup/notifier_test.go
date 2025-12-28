@@ -10,16 +10,18 @@ import (
 
 // mockNotifier is a test implementation of Notifier that records calls.
 type mockNotifier struct {
-	mu           sync.Mutex
-	startCalls   int
-	successCalls []string
-	failureCalls []struct {
+	mu             sync.Mutex
+	startCalls     int
+	successCalls   []string
+	cancelledCalls int
+	failureCalls   []struct {
 		errMsg string
 		logs   string
 	}
-	startErr   error
-	successErr error
-	failureErr error
+	startErr     error
+	successErr   error
+	failureErr   error
+	cancelledErr error
 }
 
 func (m *mockNotifier) NotifyStart() error {
@@ -46,6 +48,13 @@ func (m *mockNotifier) NotifyFailure(errMsg string, logs string) error {
 	return m.failureErr
 }
 
+func (m *mockNotifier) NotifyCancelled() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cancelledCalls++
+	return m.cancelledErr
+}
+
 func TestNullNotifier(t *testing.T) {
 	n := &NullNotifier{}
 
@@ -58,6 +67,9 @@ func TestNullNotifier(t *testing.T) {
 	}
 	if err := n.NotifyFailure("error", "logs"); err != nil {
 		t.Errorf("NotifyFailure() returned error: %v", err)
+	}
+	if err := n.NotifyCancelled(); err != nil {
+		t.Errorf("NotifyCancelled() returned error: %v", err)
 	}
 }
 
@@ -73,6 +85,9 @@ func TestCompositeNotifier_NoServicesConfigured(t *testing.T) {
 	}
 	if err := n.NotifyFailure("error", "logs"); err != nil {
 		t.Errorf("NotifyFailure() returned error: %v", err)
+	}
+	if err := n.NotifyCancelled(); err != nil {
+		t.Errorf("NotifyCancelled() returned error: %v", err)
 	}
 
 	if n.HasHealthchecks() {
@@ -205,6 +220,14 @@ func TestMockNotifier_RecordsCalls(t *testing.T) {
 	if m.failureCalls[0].errMsg != "something broke" || m.failureCalls[0].logs != "log output" {
 		t.Errorf("failureCalls[0] = %v, want {something broke, log output}", m.failureCalls[0])
 	}
+
+	// Test cancelled
+	if err := m.NotifyCancelled(); err != nil {
+		t.Errorf("NotifyCancelled() returned error: %v", err)
+	}
+	if m.cancelledCalls != 1 {
+		t.Errorf("cancelledCalls = %d, want 1", m.cancelledCalls)
+	}
 }
 
 func TestMockNotifier_ReturnsErrors(t *testing.T) {
@@ -228,6 +251,13 @@ func TestMockNotifier_ReturnsErrors(t *testing.T) {
 		m := &mockNotifier{failureErr: testErr}
 		if err := m.NotifyFailure("err", "logs"); err != testErr {
 			t.Errorf("NotifyFailure() = %v, want %v", err, testErr)
+		}
+	})
+
+	t.Run("cancelled error", func(t *testing.T) {
+		m := &mockNotifier{cancelledErr: testErr}
+		if err := m.NotifyCancelled(); err != testErr {
+			t.Errorf("NotifyCancelled() = %v, want %v", err, testErr)
 		}
 	})
 }

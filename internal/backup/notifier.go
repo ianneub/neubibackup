@@ -19,6 +19,9 @@ type Notifier interface {
 	// NotifyFailure signals that a backup failed.
 	// The logs parameter contains the backup log output for services that support it.
 	NotifyFailure(errMsg string, logs string) error
+
+	// NotifyCancelled signals that a backup was cancelled by the user.
+	NotifyCancelled() error
 }
 
 // CompositeNotifier combines multiple notification services into a single Notifier.
@@ -115,6 +118,15 @@ func (n *CompositeNotifier) NotifyFailure(errMsg string, logs string) error {
 	return firstErr
 }
 
+// NotifyCancelled signals that a backup was cancelled by the user.
+// Sends a log ping to healthchecks.io if configured (doesn't change check status).
+func (n *CompositeNotifier) NotifyCancelled() error {
+	if n.healthchecks != nil {
+		return n.healthchecks.Log("Backup cancelled by user")
+	}
+	return nil
+}
+
 // HasHealthchecks returns true if healthchecks.io is configured.
 func (n *CompositeNotifier) HasHealthchecks() bool {
 	return n.healthchecks != nil
@@ -141,5 +153,10 @@ func (n *NullNotifier) NotifySuccess(_ string) error {
 
 // NotifyFailure does nothing and returns nil.
 func (n *NullNotifier) NotifyFailure(_, _ string) error {
+	return nil
+}
+
+// NotifyCancelled does nothing and returns nil.
+func (n *NullNotifier) NotifyCancelled() error {
 	return nil
 }

@@ -155,6 +155,9 @@ func (o *Orchestrator) Run(ctx context.Context) Result {
 		// Check if backup was cancelled
 		if errors.Is(backupErr, context.Canceled) {
 			log.Println("Backup was cancelled by user")
+			if err := o.notifier.NotifyCancelled(); err != nil {
+				log.Printf("Warning: cancellation notification failed: %v", err)
+			}
 			return Result{
 				Success:   false,
 				Cancelled: true,

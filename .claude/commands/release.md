@@ -39,11 +39,11 @@ Create a new release for NeubiBackup following semantic versioning.
 
 ## Wait for Release Workflow
 
-1. **Monitor the GitHub Actions workflow**: Use `gh run list --workflow=release.yml --limit=1` to find the running workflow.
+1. **Find the workflow run**: Use `gh run list --workflow=release.yml --limit=1 --json databaseId -q '.[0].databaseId'` to get the run ID.
 
-2. **Wait for completion**: Use `gh run watch <run-id>` or poll with `gh run view <run-id>` until the workflow completes.
+2. **Wait for completion**: **ALWAYS** use `gh run watch <run-id>` to wait for the workflow to complete. This command will block until the workflow finishes and display real-time progress. Do NOT poll manually or use other methods.
 
-3. **Verify success**: Confirm the workflow completed successfully. If it failed, inform the user and provide the workflow URL.
+3. **Verify success**: After `gh run watch` completes, confirm the workflow succeeded. If it failed, inform the user and provide the workflow URL.
 
 ## Generate Release Notes
 

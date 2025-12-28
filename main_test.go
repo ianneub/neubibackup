@@ -59,95 +59,63 @@ func TestCancellationDetection(t *testing.T) {
 	}
 }
 
-// TestBackupMutexBehavior tests the backup mutex locking behavior
-func TestBackupMutexBehavior(t *testing.T) {
-	// Reset global state for test
-	backupMu.Lock()
-	originalRunning := backupRunning
-	backupRunning = false
-	backupMu.Unlock()
+// TestBackupStateBehavior tests the backup state through the BackupState type
+func TestBackupStateBehavior(t *testing.T) {
+	// Ensure we start in a clean state
+	backupState.Reset()
 
-	defer func() {
-		backupMu.Lock()
-		backupRunning = originalRunning
-		backupMu.Unlock()
-	}()
-
-	// Test that we can check backup status
-	backupMu.Lock()
-	running := backupRunning
-	backupMu.Unlock()
-
-	if running {
-		t.Error("backupRunning should be false initially in test")
+	// Test that backup is not running initially
+	if backupState.IsRunning() {
+		t.Error("backup should not be running initially")
 	}
 
 	// Simulate starting a backup
-	backupMu.Lock()
-	backupRunning = true
-	backupMu.Unlock()
+	ctx, err := backupState.StartBackup(context.Background())
+	if err != nil {
+		t.Fatalf("StartBackup failed: %v", err)
+	}
+	if ctx == nil {
+		t.Fatal("StartBackup returned nil context")
+	}
 
-	backupMu.Lock()
-	running = backupRunning
-	backupMu.Unlock()
+	if !backupState.IsRunning() {
+		t.Error("backup should be running after StartBackup")
+	}
 
-	if !running {
-		t.Error("backupRunning should be true after setting")
+	// Reset state
+	backupState.Reset()
+
+	if backupState.IsRunning() {
+		t.Error("backup should not be running after Reset")
 	}
 }
 
 // TestStopBackupWhenNotRunning tests stopBackup behavior when no backup is running
 func TestStopBackupWhenNotRunning(t *testing.T) {
-	// Reset global state for test
-	backupMu.Lock()
-	originalRunning := backupRunning
-	originalCancel := backupCancel
-	backupRunning = false
-	backupCancel = nil
-	backupMu.Unlock()
-
-	defer func() {
-		backupMu.Lock()
-		backupRunning = originalRunning
-		backupCancel = originalCancel
-		backupMu.Unlock()
-	}()
+	// Ensure we start in a clean state
+	backupState.Reset()
 
 	// This should not panic when no backup is running
 	stopBackup()
 
 	// Verify state is unchanged
-	backupMu.Lock()
-	running := backupRunning
-	backupMu.Unlock()
-
-	if running {
-		t.Error("backupRunning should still be false")
+	if backupState.IsRunning() {
+		t.Error("backup should still not be running")
 	}
 }
 
 // TestStopBackupWhenRunning tests stopBackup cancels the context
 func TestStopBackupWhenRunning(t *testing.T) {
-	// Reset global state for test
-	backupMu.Lock()
-	originalRunning := backupRunning
-	originalCancel := backupCancel
-	backupMu.Unlock()
+	// Ensure we start in a clean state
+	backupState.Reset()
 
-	defer func() {
-		backupMu.Lock()
-		backupRunning = originalRunning
-		backupCancel = originalCancel
-		backupMu.Unlock()
-	}()
+	// Start a backup to get a context we can verify gets cancelled
+	ctx, err := backupState.StartBackup(context.Background())
+	if err != nil {
+		t.Fatalf("StartBackup failed: %v", err)
+	}
 
-	// Create a context that we can verify gets cancelled
-	ctx, cancel := context.WithCancel(context.Background())
-
-	backupMu.Lock()
-	backupRunning = true
-	backupCancel = cancel
-	backupMu.Unlock()
+	defer backupState.Reset()
 
 	// Call stopBackup
 	stopBackup()
@@ -479,40 +447,50 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-// TestUpdateMutexBehavior tests the update mutex locking behavior
-func TestUpdateMutexBehavior(t *testing.T) {
-	// Reset global state for test
-	updateMu.Lock()
-	originalInProgress := updateInProgress
-	updateInProgress = false
-	updateMu.Unlock()
+// TestUpdateStateBehavior tests the update state through the UpdateState type
+func TestUpdateStateBehavior(t *testing.T) {
+	// Reset state
+	updateState.FinishUpdate()
+	updateState.ClearAvailableVersion()
 
-	defer func() {
-		updateMu.Lock()
-		updateInProgress = originalInProgress
-		updateMu.Unlock()
-	}()
-
-	// Test that we can check update status
-	updateMu.Lock()
-	inProgress := updateInProgress
-	updateMu.Unlock()
-
-	if inProgress {
-		t.Error("updateInProgress should be false initially in test")
+	// Test that update is not in progress initially
+	if updateState.IsInProgress() {
+		t.Error("update should not be in progress initially")
 	}
 
 	// Simulate starting an update
-	updateMu.Lock()
-	updateInProgress = true
-	updateMu.Unlock()
+	if !updateState.TryStartUpdate() {
+		t.Error("TryStartUpdate should return true when not in progress")
+	}
 
-	updateMu.Lock()
-	inProgress = updateInProgress
-	updateMu.Unlock()
+	if !updateState.IsInProgress() {
+		t.Error("update should be in progress after TryStartUpdate")
+	}
 
-	if !inProgress {
-		t.Error("updateInProgress should be true after setting")
+	// Try starting again should fail
+	if updateState.TryStartUpdate() {
+		t.Error("TryStartUpdate should return false when already in progress")
+	}
+
+	// Finish the update
+	updateState.FinishUpdate()
+
+	if updateState.IsInProgress() {
+		t.Error("update should not be in progress after FinishUpdate")
+	}
+
+	// Test available version
+	updateState.SetAvailableVersion("v1.2.3")
+	if !updateState.HasUpdate() {
+		t.Error("HasUpdate should return true after setting version")
+	}
+	if updateState.GetAvailableVersion() != "v1.2.3" {
+		t.Errorf("GetAvailableVersion = %q, want v1.2.3", updateState.GetAvailableVersion())
+	}
+
+	updateState.ClearAvailableVersion()
+	if updateState.HasUpdate() {
+		t.Error("HasUpdate should return false after clearing version")
 	}
 }
 
@@ -591,24 +569,19 @@ func TestStateUpdateFields(t *testing.T) {
 
 // TestUpdateBlockedDuringBackup tests that updates wait for backups
 func TestUpdateBlockedDuringBackup(t *testing.T) {
-	// Reset global state
-	backupMu.Lock()
-	originalRunning := backupRunning
-	backupRunning = true // Simulate a running backup
-	backupMu.Unlock()
+	// Reset state first
+	backupState.Reset()
 
-	defer func() {
-		backupMu.Lock()
-		backupRunning = originalRunning
-		backupMu.Unlock()
-	}()
+	// Start a backup to simulate a running backup
+	_, err := backupState.StartBackup(context.Background())
+	if err != nil {
+		t.Fatalf("StartBackup failed: %v", err)
+	}
+
+	defer backupState.Reset()
 
 	// Check that backup is detected as running
-	backupMu.Lock()
-	running := backupRunning
-	backupMu.Unlock()
-
-	if !running {
+	if !backupState.IsRunning() {
 		t.Error("Backup should be detected as running")
 	}
 

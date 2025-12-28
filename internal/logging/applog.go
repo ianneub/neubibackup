@@ -64,11 +64,23 @@ func (w *rotatingWriter) rotate() {
 	w.size = 0
 }
 
-// Close closes the underlying file.
+// Sync flushes the file to disk.
+func (w *rotatingWriter) Sync() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file != nil {
+		return w.file.Sync()
+	}
+	return nil
+}
+
+// Close syncs and closes the underlying file.
 func (w *rotatingWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.file != nil {
+		// Sync before closing to ensure all logs are flushed
+		_ = w.file.Sync()
 		return w.file.Close()
 	}
 	return nil

@@ -7,6 +7,7 @@ import (
 	"log"
 	"runtime"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/creativeprojects/go-selfupdate"
 )
 
@@ -29,6 +30,12 @@ func New(currentVersion, repoOwner, repoName string) *Updater {
 // CheckForUpdate queries GitHub and returns the new version if available.
 // Returns empty string and false if no update is available.
 func (u *Updater) CheckForUpdate(ctx context.Context) (newVersion string, available bool, err error) {
+	// Skip update check if current version is not a valid semver (e.g., "dev")
+	if !isValidSemver(u.currentVersion) {
+		log.Printf("Skipping update check: current version %q is not a valid semver", u.currentVersion)
+		return "", false, nil
+	}
+
 	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
 	if err != nil {
 		return "", false, fmt.Errorf("creating GitHub source: %w", err)
@@ -56,6 +63,12 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (newVersion string, availa
 	}
 
 	return latest.Version(), true, nil
+}
+
+// isValidSemver checks if a version string is a valid semantic version.
+func isValidSemver(version string) bool {
+	_, err := semver.NewVersion(version)
+	return err == nil
 }
 
 // DownloadAndApply downloads the latest update and applies it.

@@ -9,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"time"
 
 	"neubibackup/assets"
+	"neubibackup/internal/app"
 	"neubibackup/internal/autostart"
 	"neubibackup/internal/config"
 	"neubibackup/internal/healthchecks"
@@ -48,11 +48,8 @@ var (
 	appCtx    context.Context
 	appCancel context.CancelFunc
 
-	// Backup state
-	backupMu       sync.Mutex
-	backupRunning  bool
-	backupCancel   context.CancelFunc
-	backupProgress *restic.BackupProgress
+	// Thread-safe backup state
+	backupState = app.NewBackupState()
 
 	// Menu items for dynamic updates
 	mStatus       *systray.MenuItem
@@ -62,13 +59,11 @@ var (
 	mUpdateStatus *systray.MenuItem
 
 	// Updater state
-	appUpdater       *updater.Updater
-	availableVersion string
-	updateTicker     *time.Ticker
+	appUpdater   *updater.Updater
+	updateTicker *time.Ticker
 
-	// Auto-update state
-	updateMu         sync.Mutex
-	updateInProgress bool
+	// Thread-safe update state
+	updateState = app.NewUpdateState()
 )
 
 func main() {
@@ -239,7 +234,7 @@ func setupMenu() {
 	if !isConfigured {
 		mStatus = systray.AddMenuItem("⚠️ Configuration required...", "Please edit config.yaml")
 	} else {
-		mStatus = systray.AddMenuItem(tray.FormatStatus(appState, backupRunning), "Backup status")
+		mStatus = systray.AddMenuItem(tray.FormatStatus(appState, backupState.IsRunning()), "Backup status")
 	}
 	mStatus.Disable()
 
@@ -328,7 +323,7 @@ func setupMenu() {
 				}
 
 			case <-mUpdateStatus.ClickedCh:
-				if availableVersion != "" {
+				if updateState.HasUpdate() {
 					// User clicked to install update
 					go installUpdate()
 				} else {
@@ -363,14 +358,10 @@ func onSystemWake() {
 }
 
 func triggerBackupNow() {
-	backupMu.Lock()
-	if backupRunning {
-		backupMu.Unlock()
+	if backupState.IsRunning() {
 		log.Println("Backup already running")
 		return
 	}
-	backupRunning = true
-	backupMu.Unlock()
 
 	go func() {
 		runBackup()
@@ -378,33 +369,24 @@ func triggerBackupNow() {
 }
 
 func stopBackup() {
-	backupMu.Lock()
-	defer backupMu.Unlock()
-
-	if !backupRunning {
+	if !backupState.IsRunning() {
 		log.Println("No backup running")
 		return
 	}
 
-	if backupCancel != nil {
-		log.Println("Stopping backup...")
-		backupCancel()
-	}
+	log.Println("Stopping backup...")
+	backupState.StopBackup()
 }
 
 func runBackup() {
-	backupMu.Lock()
-	backupRunning = true
-	var ctx context.Context
-	ctx, backupCancel = context.WithCancel(appCtx)
-	backupMu.Unlock()
+	ctx, err := backupState.StartBackup(appCtx)
+	if err != nil {
+		log.Println("Backup already running")
+		return
+	}
 
 	defer func() {
-		backupMu.Lock()
-		backupRunning = false
-		backupCancel = nil
-		backupProgress = nil
-		backupMu.Unlock()
+		backupState.Reset()
 		updateStatus()
 		updateIcon()
 	}()
@@ -503,9 +485,7 @@ func runBackup() {
 
 	// Progress callback for UI updates
 	onProgress := func(progress restic.BackupProgress) {
-		backupMu.Lock()
-		backupProgress = &progress
-		backupMu.Unlock()
+		backupState.SetProgress(&progress)
 		updateStatus()
 	}
 
@@ -581,10 +561,8 @@ func updateStatus() {
 		return
 	}
 
-	backupMu.Lock()
-	running := backupRunning
-	progress := backupProgress
-	backupMu.Unlock()
+	running := backupState.IsRunning()
+	progress := backupState.GetProgress()
 
 	var title string
 	if running && progress != nil {
@@ -597,7 +575,7 @@ func updateStatus() {
 }
 
 func updateIcon() {
-	if backupRunning {
+	if backupState.IsRunning() {
 		systray.SetIcon(assets.IconRunning)
 		return
 	}
@@ -681,12 +659,10 @@ func watchConfigFile() {
 
 func reloadConfig() {
 	// Stop any running backup before reloading config
-	backupMu.Lock()
-	if backupRunning && backupCancel != nil {
+	if backupState.IsRunning() {
 		log.Println("Stopping running backup due to config change...")
-		backupCancel()
+		backupState.StopBackup()
 	}
-	backupMu.Unlock()
 
 	newCfg, err := config.Load()
 	if err != nil {
@@ -718,7 +694,7 @@ func reloadConfig() {
 			mBackupNow.Enable()
 		}
 		if mStatus != nil {
-			mStatus.SetTitle(tray.FormatStatus(appState, backupRunning))
+			mStatus.SetTitle(tray.FormatStatus(appState, backupState.IsRunning()))
 		}
 	}
 
@@ -798,7 +774,7 @@ func manualUpdateCheck() {
 	checkForUpdates()
 
 	// Re-enable the menu item if no update was found
-	if availableVersion == "" {
+	if !updateState.HasUpdate() {
 		mUpdateStatus.SetTitle("Check for Updates")
 		mUpdateStatus.Enable()
 	}
@@ -820,7 +796,7 @@ func checkForUpdates() {
 	}
 
 	if available {
-		availableVersion = newVersion
+		updateState.SetAvailableVersion(newVersion)
 		mUpdateStatus.SetTitle(fmt.Sprintf("Update Available (%s)", newVersion))
 		mUpdateStatus.Enable()
 		log.Printf("Update available: %s", newVersion)
@@ -835,31 +811,19 @@ func checkForUpdates() {
 // attemptAutoUpdate tries to apply an update automatically in the background.
 // It waits for any running backup to complete before applying.
 func attemptAutoUpdate(version string) {
-	updateMu.Lock()
-	if updateInProgress {
-		updateMu.Unlock()
+	if !updateState.TryStartUpdate() {
 		log.Println("Auto-update: already in progress, skipping")
 		return
 	}
-	updateInProgress = true
-	updateMu.Unlock()
 
-	defer func() {
-		updateMu.Lock()
-		updateInProgress = false
-		updateMu.Unlock()
-	}()
+	defer updateState.FinishUpdate()
 
 	// Wait for backup to complete if running (with timeout)
 	waitStart := time.Now()
 	maxWait := 2 * time.Hour
 
 	for {
-		backupMu.Lock()
-		running := backupRunning
-		backupMu.Unlock()
-
-		if !running {
+		if !backupState.IsRunning() {
 			break
 		}
 
@@ -924,14 +888,13 @@ func attemptAutoUpdate(version string) {
 
 func installUpdate() {
 	// Prevent update during backup
-	backupMu.Lock()
-	if backupRunning {
-		backupMu.Unlock()
+	if backupState.IsRunning() {
 		log.Println("Cannot update while backup is running")
 		mUpdateStatus.SetTitle("Update blocked - backup running")
 		return
 	}
-	backupMu.Unlock()
+
+	availableVersion := updateState.GetAvailableVersion()
 
 	mUpdateStatus.SetTitle("Downloading update...")
 	mUpdateStatus.Disable()
@@ -974,11 +937,7 @@ func onExit() {
 	}
 
 	// Cancel any running backup
-	backupMu.Lock()
-	if backupCancel != nil {
-		backupCancel()
-	}
-	backupMu.Unlock()
+	backupState.StopBackup()
 
 	// Close Tailscale if still connected (safety net for mid-backup exit)
 	if tailscaleMgr != nil {

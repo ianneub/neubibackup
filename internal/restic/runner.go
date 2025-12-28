@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"neubibackup/internal/config"
@@ -70,8 +73,8 @@ func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer,
 	// Build command arguments
 	args := buildBackupArgs(cfg)
 
-	fmt.Fprintf(logWriter, "Running: restic %v\n", args)
-	fmt.Fprintf(logWriter, "Repository: %s\n\n", cfg.Repository.Path)
+	fmt.Fprintf(logWriter, "Running: restic %v\n", sanitizeArgsForLogging(args))
+	fmt.Fprintf(logWriter, "Repository: %s\n\n", sanitizeURLForLogging(cfg.Repository.Path))
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 
@@ -178,6 +181,99 @@ func buildEnv(cfg *config.Config, proxyAddr string) []string {
 	}
 
 	return env
+}
+
+// sanitizeURLForLogging masks passwords in URLs for safe logging.
+// Handles both standard URLs (rest:https://user:pass@host) and other formats.
+func sanitizeURLForLogging(path string) string {
+	// Handle restic REST backend format: rest:https://user:pass@host/path
+	if strings.HasPrefix(path, "rest:") {
+		prefix := "rest:"
+		urlPart := strings.TrimPrefix(path, prefix)
+		sanitized := maskPasswordInURL(urlPart)
+		return prefix + sanitized
+	}
+
+	// Handle other URL formats (sftp, s3, etc. with embedded credentials)
+	return maskPasswordInURL(path)
+}
+
+// maskPasswordInURL attempts to parse and mask password in a URL string.
+func maskPasswordInURL(urlStr string) string {
+	// Try to parse as a URL
+	parsed, err := url.Parse(urlStr)
+	if err != nil {
+		// If it doesn't parse as URL, try regex as fallback
+		return maskPasswordWithRegex(urlStr)
+	}
+
+	// If URL has user info with password, mask it
+	if parsed.User != nil {
+		if _, hasPassword := parsed.User.Password(); hasPassword {
+			// Use the raw userinfo from the URL which preserves encoding
+			// Format is: scheme://userinfo@host/path
+			// Find the userinfo portion and replace the password part
+			username := parsed.User.Username()
+			// Reconstruct URL with masked password
+			// We need to find everything between "username:" and "@"
+			schemeEnd := strings.Index(urlStr, "://")
+			if schemeEnd == -1 {
+				return maskPasswordWithRegex(urlStr)
+			}
+			afterScheme := urlStr[schemeEnd+3:]
+			atIdx := strings.Index(afterScheme, "@")
+			if atIdx == -1 {
+				return urlStr
+			}
+			userInfo := afterScheme[:atIdx]
+			colonIdx := strings.Index(userInfo, ":")
+			if colonIdx == -1 {
+				return urlStr
+			}
+			// Replace userinfo with masked version
+			maskedUserInfo := username + ":****"
+			return urlStr[:schemeEnd+3] + maskedUserInfo + afterScheme[atIdx:]
+		}
+	}
+
+	return urlStr
+}
+
+// maskPasswordWithRegex is a fallback for non-standard URL formats.
+var passwordInURLRegex = regexp.MustCompile(`(://[^:]+:)([^@]+)(@)`)
+
+func maskPasswordWithRegex(s string) string {
+	return passwordInURLRegex.ReplaceAllString(s, "${1}****${3}")
+}
+
+// sanitizeArgsForLogging returns a copy of args with sensitive values masked.
+func sanitizeArgsForLogging(args []string) []string {
+	result := make([]string, len(args))
+	copy(result, args)
+
+	for i := 0; i < len(result); i++ {
+		// Mask the value after -r or --repo flag
+		if (result[i] == "-r" || result[i] == "--repo") && i+1 < len(result) {
+			result[i+1] = sanitizeURLForLogging(result[i+1])
+			i++ // Skip the next arg since we just processed it
+			continue
+		}
+
+		// Handle --repo=value format
+		if strings.HasPrefix(result[i], "--repo=") {
+			value := strings.TrimPrefix(result[i], "--repo=")
+			result[i] = "--repo=" + sanitizeURLForLogging(value)
+			continue
+		}
+
+		// Handle -r=value format (less common but possible)
+		if strings.HasPrefix(result[i], "-r=") {
+			value := strings.TrimPrefix(result[i], "-r=")
+			result[i] = "-r=" + sanitizeURLForLogging(value)
+		}
+	}
+
+	return result
 }
 
 // RunCommand runs an arbitrary restic command (for testing, init, etc).

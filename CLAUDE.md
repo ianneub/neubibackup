@@ -70,6 +70,15 @@ GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 - Add `--use-fs-snapshot` flag for VSS snapshots
 - Open files with `notepad` command
 
+## Testing
+
+When adding new features or fixing bugs, always write tests:
+
+- Write unit tests for new functions and logic
+- Prefer real implementations over mocks when possible
+- Use table-driven tests for testing multiple cases
+- Run `go test ./...` to verify all tests pass before committing
+
 ## Documentation
 
 When adding new features or making user-facing changes, always update the README.md file to reflect those changes. This includes:

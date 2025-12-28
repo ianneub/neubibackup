@@ -501,3 +501,127 @@ func TestBuildBackupArgs_ArgOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeURLForLogging(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "REST backend with password",
+			input:    "rest:https://user:secretpassword@backup.example.com/repo",
+			expected: "rest:https://user:****@backup.example.com/repo",
+		},
+		{
+			name:     "REST backend without password",
+			input:    "rest:https://backup.example.com/repo",
+			expected: "rest:https://backup.example.com/repo",
+		},
+		{
+			name:     "SFTP with password",
+			input:    "sftp://user:mypassword@server.example.com/backup",
+			expected: "sftp://user:****@server.example.com/backup",
+		},
+		{
+			name:     "local path",
+			input:    "/backup/repo",
+			expected: "/backup/repo",
+		},
+		{
+			name:     "S3 bucket without credentials",
+			input:    "s3:bucket-name/path/to/repo",
+			expected: "s3:bucket-name/path/to/repo",
+		},
+		{
+			name:     "HTTPS URL with password and port",
+			input:    "rest:https://admin:supersecret123@backup.example.com:8080/restic",
+			expected: "rest:https://admin:****@backup.example.com:8080/restic",
+		},
+		{
+			name:     "URL with special characters in password",
+			input:    "rest:https://user:p%40ss%2Fw0rd@backup.example.com/repo",
+			expected: "rest:https://user:****@backup.example.com/repo",
+		},
+		{
+			name:     "HTTP URL with password",
+			input:    "rest:http://user:password@localhost:8000/backup",
+			expected: "rest:http://user:****@localhost:8000/backup",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeURLForLogging(tt.input)
+			if result != tt.expected {
+				t.Errorf("sanitizeURLForLogging(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSanitizeArgsForLogging(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected []string
+	}{
+		{
+			name:     "args with -r flag and password in URL",
+			args:     []string{"backup", "-r", "rest:https://user:secret@server.com/repo", "/home"},
+			expected: []string{"backup", "-r", "rest:https://user:****@server.com/repo", "/home"},
+		},
+		{
+			name:     "args with --repo flag and password in URL",
+			args:     []string{"backup", "--repo", "rest:https://user:secret@server.com/repo", "/home"},
+			expected: []string{"backup", "--repo", "rest:https://user:****@server.com/repo", "/home"},
+		},
+		{
+			name:     "args with --repo=value format",
+			args:     []string{"backup", "--repo=rest:https://user:secret@server.com/repo", "/home"},
+			expected: []string{"backup", "--repo=rest:https://user:****@server.com/repo", "/home"},
+		},
+		{
+			name:     "args with -r=value format",
+			args:     []string{"backup", "-r=rest:https://user:secret@server.com/repo", "/home"},
+			expected: []string{"backup", "-r=rest:https://user:****@server.com/repo", "/home"},
+		},
+		{
+			name:     "args without password in URL",
+			args:     []string{"backup", "-r", "/local/repo", "/home"},
+			expected: []string{"backup", "-r", "/local/repo", "/home"},
+		},
+		{
+			name:     "original args not modified",
+			args:     []string{"backup", "-r", "rest:https://user:secret@server.com/repo"},
+			expected: []string{"backup", "-r", "rest:https://user:****@server.com/repo"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Make a copy to verify original isn't modified
+			originalCopy := make([]string, len(tt.args))
+			copy(originalCopy, tt.args)
+
+			result := sanitizeArgsForLogging(tt.args)
+
+			// Check result matches expected
+			if len(result) != len(tt.expected) {
+				t.Fatalf("sanitizeArgsForLogging() returned %d args, want %d", len(result), len(tt.expected))
+			}
+			for i := range result {
+				if result[i] != tt.expected[i] {
+					t.Errorf("sanitizeArgsForLogging()[%d] = %q, want %q", i, result[i], tt.expected[i])
+				}
+			}
+
+			// Verify original wasn't modified
+			for i := range tt.args {
+				if tt.args[i] != originalCopy[i] {
+					t.Errorf("original args modified at [%d]: was %q, now %q", i, originalCopy[i], tt.args[i])
+				}
+			}
+		})
+	}
+}

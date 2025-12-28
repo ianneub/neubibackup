@@ -30,6 +30,7 @@ All files stored in `~/neubibackup/`:
 
 - `config.yaml` - User configuration
 - `state.yaml` - App-managed state (last backup time, errors)
+- `app.log` - Application log (truncated at 1MB, useful for debugging)
 - `logs/` - Last 25 backup logs (YYYY-MM-DDTHH-MM-SS.log)
 
 ## Project Structure
@@ -75,19 +76,37 @@ GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 
 ### Windows
 
+- Runs with admin privileges (embedded manifest requests `requireAdministrator`)
+- Admin required for VSS snapshots (`--use-fs-snapshot`) and updates to Program Files
 - Wake detection via `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`
-- Add `--use-fs-snapshot` flag for VSS snapshots
+- `--use-fs-snapshot` flag added automatically for VSS snapshots
 - Open files with `notepad` command
 - Update artifact cleanup after automatic updates
+- Uses `go-winres` in CI to embed Windows manifest with admin requirement
 
-## Testing
+## Testing (REQUIRED)
 
-When adding new features or fixing bugs, **always write tests**:
+**Tests are mandatory for all new code.** When planning any feature or bug fix:
+
+1. **Include tests in the plan** - Every implementation plan must include a testing section
+2. **Write tests alongside code** - Tests should be written as part of the same task, not as a follow-up
+3. **No code is complete without tests** - A feature is not done until its tests are written and passing
+
+### Test Guidelines
 
 - Write unit tests for new functions and logic
 - Prefer real implementations over mocks when possible
 - Use table-driven tests for testing multiple cases
+- Test files go next to the code: `foo.go` → `foo_test.go`
 - Run `go test ./...` to verify all tests pass before committing
+
+### What to Test
+
+- New structs and their methods
+- New exported functions
+- Error handling paths
+- Edge cases (empty inputs, nil values, boundary conditions)
+- Concurrent access if applicable
 
 ## Versioning
 

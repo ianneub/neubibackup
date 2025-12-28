@@ -78,11 +78,21 @@ func main() {
 func onReady() {
 	appCtx, appCancel = context.WithCancel(context.Background())
 
+	// Set up persistent application logging (especially useful on Windows with -H windowsgui)
+	cleanupAppLog, err := logging.SetupAppLog()
+	if err != nil {
+		// Can't log this error to app log, but continue anyway
+		fmt.Fprintf(os.Stderr, "Warning: could not setup app log: %v\n", err)
+	} else {
+		defer cleanupAppLog()
+	}
+
+	log.Printf("NeubiBackup starting, version %s", version)
+
 	// Clean up old update artifacts on Windows
 	cleanupOldUpdates()
 
 	// Initialize autostart manager
-	var err error
 	autostartMgr, err = autostart.New()
 	if err != nil {
 		log.Printf("Warning: could not initialize autostart: %v", err)
@@ -250,6 +260,9 @@ func setupMenu() {
 	// Open Logs Folder
 	mOpenLogs := systray.AddMenuItem("Open Logs Folder", "View backup logs")
 
+	// Open App Log
+	mOpenAppLog := systray.AddMenuItem("Open App Log", "View application log")
+
 	systray.AddSeparator()
 
 	// Start at Login
@@ -299,6 +312,16 @@ func setupMenu() {
 				}
 				if err := config.OpenFolder(logsDir); err != nil {
 					log.Printf("Error opening logs folder: %v", err)
+				}
+
+			case <-mOpenAppLog.ClickedCh:
+				appLogPath, err := logging.GetAppLogPath()
+				if err != nil {
+					log.Printf("Error getting app log path: %v", err)
+					continue
+				}
+				if err := config.OpenInEditor(appLogPath); err != nil {
+					log.Printf("Error opening app log: %v", err)
 				}
 
 			case <-mUpdateStatus.ClickedCh:

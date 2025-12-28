@@ -249,6 +249,12 @@ jobs:
         shell: bash
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Install go-winres
+        run: go install github.com/tc-hib/go-winres@latest
+
+      - name: Generate Windows resources with admin manifest
+        run: go-winres make --in winres/winres.json --out rsrc_windows_amd64.syso --arch amd64
+
       - name: Build
         env:
           GOOS: windows

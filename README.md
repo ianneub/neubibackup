@@ -41,8 +41,9 @@ Download the latest release for your platform:
 
 ### Windows
 
-1. Download the `.msi` installer
+1. Download the `-setup.exe` installer
 2. Run the installer and follow the prompts
+3. On launch, you'll see a UAC prompt - this is required for VSS snapshots (consistent backups of open files) and automatic updates
 
 ## Quick Start
 
@@ -174,9 +175,10 @@ All NeubiBackup data is stored in `~/neubibackup/`:
 
 ### Backup keeps failing
 
-1. Click **Open Logs Folder** from the tray menu
-2. Open the most recent log file to see error details
-3. Common issues:
+1. Click **Open Logs Folder** from the tray menu to see backup-specific logs
+2. Click **Open App Log** to see application logs (useful for update errors and startup issues)
+3. Open the most recent log file to see error details
+4. Common issues:
    - Repository not accessible (check network/credentials)
    - Invalid paths in backup configuration
    - Insufficient permissions
@@ -184,7 +186,7 @@ All NeubiBackup data is stored in `~/neubibackup/`:
 ### App won't start
 
 - **macOS**: Check System Settings > Privacy & Security for blocked apps
-- **Windows**: Run as administrator if needed
+- **Windows**: Allow the UAC prompt - admin privileges are required for VSS snapshots
 
 ### Missed backups not running
 

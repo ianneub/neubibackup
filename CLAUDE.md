@@ -80,7 +80,7 @@ GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 - Admin required for VSS snapshots (`--use-fs-snapshot`) and updates to Program Files
 - Wake detection via `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`
 - `--use-fs-snapshot` flag added automatically for VSS snapshots
-- Open files with `notepad` command
+- Open files with default application via `rundll32`
 - Update artifact cleanup after automatic updates
 - Uses `go-winres` in CI to embed Windows manifest with admin requirement
 

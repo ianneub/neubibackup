@@ -21,8 +21,22 @@ jobs:
       - name: Download restic binaries
         run: ./scripts/download-restic.sh
 
-      - name: Run tests
-        run: go test -v -race ./...
+      - name: Run tests with coverage
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Generate coverage report
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - name: Display coverage summary
+        run: go tool cover -func=coverage.out
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.out
+            coverage.html
 
       - name: Run vet
         run: go vet ./...

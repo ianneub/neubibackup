@@ -1,6 +1,6 @@
 //go:build !darwin
 
-package main
+package app
 
 // handleMacOSFirstRun is a no-op on non-macOS platforms.
-func handleMacOSFirstRun() {}
+func (a *App) handleMacOSFirstRun() {}

@@ -3,9 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -56,78 +53,6 @@ func TestCancellationDetection(t *testing.T) {
 				t.Errorf("errors.Is(%v, context.Canceled) = %v, want %v", tt.err, result, tt.isCancellation)
 			}
 		})
-	}
-}
-
-// TestBackupStateBehavior tests the backup state through the BackupState type
-func TestBackupStateBehavior(t *testing.T) {
-	// Ensure we start in a clean state
-	backupState.Reset()
-
-	// Test that backup is not running initially
-	if backupState.IsRunning() {
-		t.Error("backup should not be running initially")
-	}
-
-	// Simulate starting a backup
-	ctx, err := backupState.StartBackup(context.Background())
-	if err != nil {
-		t.Fatalf("StartBackup failed: %v", err)
-	}
-	if ctx == nil {
-		t.Fatal("StartBackup returned nil context")
-	}
-
-	if !backupState.IsRunning() {
-		t.Error("backup should be running after StartBackup")
-	}
-
-	// Reset state
-	backupState.Reset()
-
-	if backupState.IsRunning() {
-		t.Error("backup should not be running after Reset")
-	}
-}
-
-// TestStopBackupWhenNotRunning tests stopBackup behavior when no backup is running
-func TestStopBackupWhenNotRunning(t *testing.T) {
-	// Ensure we start in a clean state
-	backupState.Reset()
-
-	// This should not panic when no backup is running
-	stopBackup()
-
-	// Verify state is unchanged
-	if backupState.IsRunning() {
-		t.Error("backup should still not be running")
-	}
-}
-
-// TestStopBackupWhenRunning tests stopBackup cancels the context
-func TestStopBackupWhenRunning(t *testing.T) {
-	// Ensure we start in a clean state
-	backupState.Reset()
-
-	// Start a backup to get a context we can verify gets cancelled
-	ctx, err := backupState.StartBackup(context.Background())
-	if err != nil {
-		t.Fatalf("StartBackup failed: %v", err)
-	}
-
-	defer backupState.Reset()
-
-	// Call stopBackup
-	stopBackup()
-
-	// Verify context was cancelled
-	select {
-	case <-ctx.Done():
-		if ctx.Err() != context.Canceled {
-			t.Errorf("expected context.Canceled, got %v", ctx.Err())
-		}
-	default:
-		t.Error("context should be cancelled after stopBackup")
 	}
 }
 
@@ -247,23 +172,23 @@ func TestStateHasBackedUpToday(t *testing.T) {
 	loc := time.Local
 
 	tests := []struct {
-		name            string
-		lastSuccess     time.Time
+		name             string
+		lastSuccess      time.Time
 		hasBackedUpToday bool
 	}{
 		{
-			name:            "zero time",
-			lastSuccess:     time.Time{},
+			name:             "zero time",
+			lastSuccess:      time.Time{},
 			hasBackedUpToday: false,
 		},
 		{
-			name:            "today",
-			lastSuccess:     time.Now(),
+			name:             "today",
+			lastSuccess:      time.Now(),
 			hasBackedUpToday: true,
 		},
 		{
-			name:            "yesterday",
-			lastSuccess:     time.Now().Add(-24 * time.Hour),
+			name:             "yesterday",
+			lastSuccess:      time.Now().Add(-24 * time.Hour),
 			hasBackedUpToday: false,
 		},
 	}
@@ -447,82 +372,6 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-// TestUpdateStateBehavior tests the update state through the UpdateState type
-func TestUpdateStateBehavior(t *testing.T) {
-	// Reset state
-	updateState.FinishUpdate()
-	updateState.ClearAvailableVersion()
-
-	// Test that update is not in progress initially
-	if updateState.IsInProgress() {
-		t.Error("update should not be in progress initially")
-	}
-
-	// Simulate starting an update
-	if !updateState.TryStartUpdate() {
-		t.Error("TryStartUpdate should return true when not in progress")
-	}
-
-	if !updateState.IsInProgress() {
-		t.Error("update should be in progress after TryStartUpdate")
-	}
-
-	// Try starting again should fail
-	if updateState.TryStartUpdate() {
-		t.Error("TryStartUpdate should return false when already in progress")
-	}
-
-	// Finish the update
-	updateState.FinishUpdate()
-
-	if updateState.IsInProgress() {
-		t.Error("update should not be in progress after FinishUpdate")
-	}
-
-	// Test available version
-	updateState.SetAvailableVersion("v1.2.3")
-	if !updateState.HasUpdate() {
-		t.Error("HasUpdate should return true after setting version")
-	}
-	if updateState.GetAvailableVersion() != "v1.2.3" {
-		t.Errorf("GetAvailableVersion = %q, want v1.2.3", updateState.GetAvailableVersion())
-	}
-
-	updateState.ClearAvailableVersion()
-	if updateState.HasUpdate() {
-		t.Error("HasUpdate should return false after clearing version")
-	}
-}
-
-// TestCleanupOldUpdatesNonWindows tests that cleanup is skipped on non-Windows
-func TestCleanupOldUpdatesNonWindows(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping non-Windows test on Windows")
-	}
-
-	// Create a temp directory with .old files
-	tempDir := t.TempDir()
-
-	// Create some .old files
-	oldFile := filepath.Join(tempDir, ".neubibackup.exe.old")
-	if err := os.WriteFile(oldFile, []byte("old binary"), 0644); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
-
-	// Verify file exists before cleanup
-	if _, err := os.Stat(oldFile); os.IsNotExist(err) {
-		t.Fatal("Test file should exist before cleanup")
-	}
-
-	// Run cleanup (should do nothing on non-Windows)
-	cleanupOldUpdates()
-
-	// File should still exist because we're not on Windows
-	if _, err := os.Stat(oldFile); os.IsNotExist(err) {
-		t.Error("File should still exist on non-Windows after cleanupOldUpdates")
-	}
-}
-
 // TestStateUpdateFields tests the new update tracking fields in state
 func TestStateUpdateFields(t *testing.T) {
 	s := &state.State{}
@@ -565,26 +414,4 @@ func TestStateUpdateFields(t *testing.T) {
 	if s.LastUpdateErrorTime != errTime {
 		t.Errorf("LastUpdateErrorTime = %v, want %v", s.LastUpdateErrorTime, errTime)
 	}
-}
-
-// TestUpdateBlockedDuringBackup tests that updates wait for backups
-func TestUpdateBlockedDuringBackup(t *testing.T) {
-	// Reset state first
-	backupState.Reset()
-
-	// Start a backup to simulate a running backup
-	_, err := backupState.StartBackup(context.Background())
-	if err != nil {
-		t.Fatalf("StartBackup failed: %v", err)
-	}
-
-	defer backupState.Reset()
-
-	// Check that backup is detected as running
-	if !backupState.IsRunning() {
-		t.Error("Backup should be detected as running")
-	}
-
-	// In a real scenario, attemptAutoUpdate would wait here
-	// We just verify the detection mechanism works
 }

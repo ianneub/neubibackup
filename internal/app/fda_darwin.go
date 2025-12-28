@@ -1,6 +1,6 @@
 //go:build darwin
 
-package main
+package app
 
 import (
 	"log"
@@ -9,7 +9,7 @@ import (
 )
 
 // handleMacOSFirstRun prompts for Full Disk Access if not already granted.
-func handleMacOSFirstRun() {
+func (a *App) handleMacOSFirstRun() {
 	if config.HasFullDiskAccess() {
 		log.Println("Full Disk Access already granted")
 		return

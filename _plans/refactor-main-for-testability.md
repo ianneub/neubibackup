@@ -212,12 +212,21 @@ func (m *Menu) RefreshOnConfigChange()
 
 ---
 
-### Phase 4: Create App Package
+### Phase 4: Create App Package - COMPLETED
 
-**Files to create:**
-- `internal/app/app.go`
+**Status:** Completed
 
-**Key type:**
+**Files created:**
+- `internal/app/app.go` (580 lines) - Main App struct with lifecycle methods
+- `internal/app/app_test.go` (~915 lines) - Comprehensive unit tests
+- `internal/app/fda_darwin.go` - macOS Full Disk Access handling
+- `internal/app/fda_other.go` - No-op stub for non-macOS platforms
+
+**Files modified:**
+- `main.go` - Reduced from 727 lines to 41 lines
+- Deleted `firstrun_darwin.go` and `firstrun_other.go` (moved to `internal/app/fda_*.go`)
+
+**Implemented type:**
 ```go
 type App struct {
     // Config & state
@@ -226,11 +235,11 @@ type App struct {
     version  string
 
     // Managers
-    sched        *scheduler.Scheduler
-    autostartMgr *autostart.Manager
-    powerWatcher *power.Watcher
-    tailscaleMgr *tailscale.Manager
-    updater      *updater.Updater
+    sched         *scheduler.Scheduler
+    autostartMgr  *autostart.Manager
+    powerWatcher  *power.Watcher
+    configWatcher *fsnotify.Watcher
+    appUpdater    *updater.Updater
 
     // Internal state
     backupState *BackupState
@@ -242,9 +251,15 @@ type App struct {
 
     // UI
     menu *tray.Menu
+
+    // Callbacks for systray operations (injected via functional options)
+    onIconUpdate  func([]byte)
+    onQuit        func()
+    setTooltip    func(string)
+    cleanupAppLog func()
 }
 
-func New(version string, opts ...Option) (*App, error)
+func New(version string, opts ...Option) *App
 func (a *App) Initialize() error
 func (a *App) Run() error
 func (a *App) Shutdown()
@@ -252,21 +267,29 @@ func (a *App) Shutdown()
 // Backup methods
 func (a *App) TriggerBackup()
 func (a *App) StopBackup()
-func (a *App) IsBackupRunning() bool
 
 // Config methods
-func (a *App) ReloadConfig() error
-
-// Implements MenuCallbacks and MenuState interfaces
+func (a *App) ReloadConfig()
 ```
 
-**Migration:**
-- Move `onReady()` logic to `App.Initialize()`
-- Move `triggerBackupNow()`, `stopBackup()` to App methods
-- Move `reloadConfig()` to App
-- Move `toggleAutostart()` to App
+**Functional options implemented:**
+- `WithOnIconUpdate(fn func([]byte))` - Injects systray.SetIcon
+- `WithOnQuit(fn func())` - Injects systray.Quit
+- `WithSetTooltip(fn func(string))` - Injects systray.SetTooltip
 
-**Tests:** Initialization, shutdown, backup triggering, config reload.
+**Migration completed:**
+- Moved `onReady()` logic to `App.Initialize()`
+- Moved `triggerBackupNow()`, `stopBackup()` to App methods
+- Moved `reloadConfig()` to App
+- Moved all helper functions to App methods
+- Moved platform-specific FDA handling to `internal/app/fda_*.go`
+
+**Test coverage:** 28.8% for internal/app package (tests written without mocks, focusing on testable components)
+
+**Results:**
+- main.go reduced from 727 lines to 41 lines
+- All tests pass with `-race` flag
+- Builds successfully on macOS and Windows
 
 ---
 
@@ -348,8 +371,10 @@ func onExit() {
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `internal/app/app.go` | Main App struct and lifecycle | Pending (Phase 4) |
-| `internal/app/app_test.go` | App unit tests | Pending (Phase 4) |
+| `internal/app/app.go` | Main App struct and lifecycle | ✅ Created |
+| `internal/app/app_test.go` | App unit tests | ✅ Created |
+| `internal/app/fda_darwin.go` | macOS FDA handling | ✅ Created |
+| `internal/app/fda_other.go` | Non-macOS FDA stub | ✅ Created |
 | `internal/app/backup_state.go` | Thread-safe backup state | ✅ Created |
 | `internal/app/backup_state_test.go` | Backup state tests | ✅ Created |
 | `internal/app/update_state.go` | Thread-safe update state | ✅ Created |

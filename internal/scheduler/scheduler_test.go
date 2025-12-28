@@ -1,0 +1,388 @@
+package scheduler
+
+import (
+	"sync"
+	"testing"
+	"time"
+
+	"neubibackup/internal/config"
+	"neubibackup/internal/state"
+)
+
+func TestNew(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *config.Config
+		wantErr bool
+	}{
+		{
+			name: "valid config with local timezone",
+			cfg: &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time: "09:00",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with explicit timezone",
+			cfg: &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time:     "09:00",
+					Timezone: "America/New_York",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid timezone",
+			cfg: &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time:     "09:00",
+					Timezone: "Invalid/Timezone",
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := &state.State{}
+			onBackup := func() {}
+
+			s, err := New(tt.cfg, st, onBackup)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("New() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && s == nil {
+				t.Error("New() returned nil scheduler without error")
+			}
+		})
+	}
+}
+
+func TestParseTime(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeStr string
+		wantHr  int
+		wantMin int
+		wantErr bool
+	}{
+		{
+			name:    "24hr format",
+			timeStr: "15:04",
+			wantHr:  15,
+			wantMin: 4,
+			wantErr: false,
+		},
+		{
+			name:    "midnight",
+			timeStr: "00:00",
+			wantHr:  0,
+			wantMin: 0,
+			wantErr: false,
+		},
+		{
+			name:    "with seconds",
+			timeStr: "09:30:45",
+			wantHr:  9,
+			wantMin: 30,
+			wantErr: false,
+		},
+		{
+			name:    "invalid format",
+			timeStr: "9:30 AM",
+			wantErr: true,
+		},
+		{
+			name:    "invalid hour",
+			timeStr: "25:00",
+			wantErr: true,
+		},
+		{
+			name:    "empty string",
+			timeStr: "",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseTime(tt.timeStr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseTime(%q) error = %v, wantErr %v", tt.timeStr, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if got.Hour() != tt.wantHr {
+					t.Errorf("parseTime(%q) hour = %d, want %d", tt.timeStr, got.Hour(), tt.wantHr)
+				}
+				if got.Minute() != tt.wantMin {
+					t.Errorf("parseTime(%q) minute = %d, want %d", tt.timeStr, got.Minute(), tt.wantMin)
+				}
+			}
+		})
+	}
+}
+
+func TestGetLocation(t *testing.T) {
+	tests := []struct {
+		name     string
+		timezone string
+		wantName string
+		wantErr  bool
+	}{
+		{
+			name:     "empty uses local",
+			timezone: "",
+			wantName: time.Local.String(),
+			wantErr:  false,
+		},
+		{
+			name:     "valid timezone",
+			timezone: "America/Los_Angeles",
+			wantName: "America/Los_Angeles",
+			wantErr:  false,
+		},
+		{
+			name:     "UTC",
+			timezone: "UTC",
+			wantName: "UTC",
+			wantErr:  false,
+		},
+		{
+			name:     "invalid timezone",
+			timezone: "Not/A/Timezone",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Timezone: tt.timezone,
+				},
+			}
+			got, err := getLocation(cfg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getLocation() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got.String() != tt.wantName {
+				t.Errorf("getLocation() = %q, want %q", got.String(), tt.wantName)
+			}
+		})
+	}
+}
+
+func TestNextBackupTime(t *testing.T) {
+	loc := time.Local
+	now := time.Now().In(loc)
+
+	tests := []struct {
+		name         string
+		scheduleTime string
+		wantToday    bool // true if should return today, false if tomorrow
+	}{
+		{
+			name:         "schedule in future today",
+			scheduleTime: now.Add(2 * time.Hour).Format("15:04"),
+			wantToday:    true,
+		},
+		{
+			name:         "schedule passed today",
+			scheduleTime: now.Add(-2 * time.Hour).Format("15:04"),
+			wantToday:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time: tt.scheduleTime,
+				},
+			}
+			st := &state.State{}
+
+			s, err := New(cfg, st, func() {})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			nextTime, err := s.NextBackupTime()
+			if err != nil {
+				t.Fatalf("NextBackupTime() error = %v", err)
+			}
+
+			today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+			tomorrow := today.AddDate(0, 0, 1)
+
+			if tt.wantToday {
+				if nextTime.Before(today) || nextTime.After(tomorrow) {
+					t.Errorf("NextBackupTime() = %v, expected today", nextTime)
+				}
+			} else {
+				if nextTime.Before(tomorrow) {
+					t.Errorf("NextBackupTime() = %v, expected tomorrow or later", nextTime)
+				}
+			}
+		})
+	}
+}
+
+func TestTriggerNow(t *testing.T) {
+	t.Run("triggers callback", func(t *testing.T) {
+		cfg := &config.Config{
+			Schedule: config.ScheduleConfig{
+				Time: "09:00",
+			},
+		}
+		st := &state.State{}
+
+		var called bool
+		var mu sync.Mutex
+		onBackup := func() {
+			mu.Lock()
+			called = true
+			mu.Unlock()
+		}
+
+		s, err := New(cfg, st, onBackup)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		s.TriggerNow()
+
+		// Wait a bit for the goroutine to execute
+		time.Sleep(50 * time.Millisecond)
+
+		mu.Lock()
+		if !called {
+			t.Error("TriggerNow() did not call onBackup")
+		}
+		mu.Unlock()
+	})
+
+	t.Run("skips if already running", func(t *testing.T) {
+		cfg := &config.Config{
+			Schedule: config.ScheduleConfig{
+				Time: "09:00",
+			},
+		}
+		st := &state.State{}
+
+		callCount := 0
+		var mu sync.Mutex
+		onBackup := func() {
+			mu.Lock()
+			callCount++
+			mu.Unlock()
+			// Simulate a long-running backup
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		s, err := New(cfg, st, onBackup)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		// Trigger first backup
+		s.TriggerNow()
+
+		// Wait a tiny bit for the goroutine to start
+		time.Sleep(10 * time.Millisecond)
+
+		// Try to trigger again while running
+		s.TriggerNow()
+
+		// Wait for the backup to complete
+		time.Sleep(150 * time.Millisecond)
+
+		mu.Lock()
+		if callCount != 1 {
+			t.Errorf("Expected onBackup to be called once, got %d", callCount)
+		}
+		mu.Unlock()
+	})
+}
+
+func TestIsRunning(t *testing.T) {
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time: "09:00",
+		},
+	}
+	st := &state.State{}
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	onBackup := func() {
+		close(started)
+		<-done // Wait until test signals to finish
+	}
+
+	s, err := New(cfg, st, onBackup)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if s.IsRunning() {
+		t.Error("IsRunning() should be false initially")
+	}
+
+	s.TriggerNow()
+	<-started // Wait for backup to start
+
+	if !s.IsRunning() {
+		t.Error("IsRunning() should be true while backup is running")
+	}
+
+	close(done) // Signal backup to finish
+	time.Sleep(50 * time.Millisecond)
+
+	if s.IsRunning() {
+		t.Error("IsRunning() should be false after backup completes")
+	}
+}
+
+func TestUpdateConfig(t *testing.T) {
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time: "09:00",
+		},
+	}
+	st := &state.State{}
+
+	s, err := New(cfg, st, func() {})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Update with valid timezone
+	newCfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time:     "10:00",
+			Timezone: "Europe/London",
+		},
+	}
+	if err := s.UpdateConfig(newCfg); err != nil {
+		t.Errorf("UpdateConfig() error = %v", err)
+	}
+
+	// Update with invalid timezone should fail
+	badCfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time:     "10:00",
+			Timezone: "Invalid/Zone",
+		},
+	}
+	if err := s.UpdateConfig(badCfg); err == nil {
+		t.Error("UpdateConfig() should error on invalid timezone")
+	}
+}

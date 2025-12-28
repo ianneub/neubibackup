@@ -1,6 +1,6 @@
 # NeubiBackup
 
-Cross-platform backup scheduler wrapping restic. See PROJECT_FILE.md for full specification.
+Cross-platform backup scheduler wrapping restic.
 
 ## Tech Stack
 
@@ -8,6 +8,9 @@ Cross-platform backup scheduler wrapping restic. See PROJECT_FILE.md for full sp
 - Embedded restic 0.18.1 binary via `//go:embed`
 - YAML config via `gopkg.in/yaml.v3`
 - `github.com/emersion/go-autostart` for launch at login
+- `github.com/fsnotify/fsnotify` for config file watching
+- `github.com/creativeprojects/go-selfupdate` for automatic updates
+- `tailscale.com` for Tailscale network integration
 
 ## Key Features
 
@@ -17,6 +20,9 @@ Cross-platform backup scheduler wrapping restic. See PROJECT_FILE.md for full sp
 - healthchecks.io integration (ping start/success/fail)
 - Pushover notifications on failure
 - Auto-reload config on file change
+- Automatic updates (background download/install every 24 hours)
+- Tailscale integration for accessing private restic repositories
+- macOS Full Disk Access detection and prompt on first run
 
 ## Data Directory
 
@@ -30,16 +36,18 @@ All files stored in `~/neubibackup/`:
 
 ```text
 internal/
-├── config/      # Load/save YAML config, default paths
+├── config/      # Load/save YAML config, default paths, FDA detection
 ├── scheduler/   # Schedule tracking, "should run now?" logic
 ├── restic/      # Binary embedding, extraction, command execution
 ├── healthchecks/# Healthchecks.io HTTP client
 ├── power/       # Platform-specific wake/sleep detection
 ├── tray/        # System tray setup, menu items, status updates
 ├── autostart/   # Wrapper around go-autostart
-├── state/       # Backup state tracking
+├── state/       # Backup state and update tracking
 ├── logging/     # Log file management, retention cleanup
-└── pushover/    # Pushover notification API client
+├── pushover/    # Pushover notification API client
+├── tailscale/   # Tailscale network integration via tsnet
+└── updater/     # Automatic update checking and installation
 ```
 
 ## Build Commands
@@ -63,16 +71,18 @@ GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 - Build as `.app` bundle for proper Mac experience
 - Wake detection via `NSWorkspaceDidWakeNotification`
 - Open files with `open` command
+- Full Disk Access detection on first run with prompt to open System Settings
 
 ### Windows
 
 - Wake detection via `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC`
 - Add `--use-fs-snapshot` flag for VSS snapshots
 - Open files with `notepad` command
+- Update artifact cleanup after automatic updates
 
 ## Testing
 
-When adding new features or fixing bugs, always write tests:
+When adding new features or fixing bugs, **always write tests**:
 
 - Write unit tests for new functions and logic
 - Prefer real implementations over mocks when possible

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -449,6 +450,12 @@ func runBackup() {
 	err = restic.RunBackup(ctx, cfg, logWriter, proxyAddr, onProgress)
 
 	if err != nil {
+		// Check if backup was manually cancelled by user
+		if errors.Is(err, context.Canceled) {
+			log.Println("Backup was cancelled by user")
+			return
+		}
+
 		log.Printf("Backup failed: %v", err)
 		recordFailure(err, hc)
 

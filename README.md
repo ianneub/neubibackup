@@ -14,11 +14,12 @@ A simple system tray application that automatically backs up your files using [r
 - **Monitoring integrations** - Optional healthchecks.io and Pushover notifications
 - **No restic installation required** - Restic is bundled with the app
 - **Automatic updates** - Updates are downloaded and applied silently in the background
+- **Tailscale integration** - Optional support for accessing private repos via Tailscale
 
 ## Supported Platforms
 
-- macOS (Apple Silicon / arm64)
-- Windows (64-bit / amd64)
+- macOS (Apple Silicon and Intel)
+- Windows (64-bit)
 
 ## Installation
 
@@ -90,10 +91,21 @@ backup:
     - "node_modules"
     - ".Trash"
 
+# Optional: Additional restic arguments
+restic_args:
+  global: []                 # Args for all commands
+  backup:                    # Args for backup command
+    - "--verbose"
+  # Note: The following flags are always added automatically:
+  #   --one-file-system    (don't cross filesystem boundaries)
+  #   --exclude-caches     (skip directories with CACHEDIR.TAG)
+  #   --use-fs-snapshot    (Windows only: use VSS for consistent snapshots)
+
 # Optional: healthchecks.io monitoring
 healthchecks:
   enabled: false
   ping_url: "https://hc-ping.com/your-uuid-here"
+  send_logs_on_failure: true
 
 # Optional: Pushover notifications
 pushover:
@@ -102,6 +114,14 @@ pushover:
   api_token: "your-api-token"
   on_failure: true
   on_success: false
+
+# Optional: Tailscale integration
+# Enable this to access restic REST servers that are only reachable via Tailscale.
+tailscale:
+  enabled: false
+  auth_key: ""               # Get from https://login.tailscale.com/admin/settings/keys
+  hostname: "neubibackup"    # Hostname for this device in your tailnet
+  ephemeral: false           # Remove device from tailnet when app closes
 ```
 
 ### Setting Up a Repository
@@ -120,18 +140,20 @@ Common options:
 
 Click the tray icon to access:
 
-- **Status** - Shows time since last successful backup
-- **Backup Now** - Start an immediate backup
+- **Status** - Shows time since last successful backup, or progress during backup
+- **Backup Now** - Start an immediate backup (becomes "Stop Backup" while running)
 - **Open Config File** - Edit your configuration
 - **Open Logs Folder** - View backup logs
 - **Start at Login** - Toggle automatic startup
 - **Check for Updates** - Check for and install new versions
+- **Version** - Shows current app and restic versions
 
 ### Icon Status
 
-- **Green/checkmark** - Last backup succeeded
+- **Green** - Last backup succeeded
 - **Animated** - Backup in progress
-- **Red/warning** - Last backup failed or not configured
+- **Red** - Last backup failed or not configured
+- **Gray** - Configured but no backup yet
 
 ## Data Location
 

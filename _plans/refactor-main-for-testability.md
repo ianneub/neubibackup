@@ -35,13 +35,23 @@ internal/
 
 ## Implementation Phases
 
-### Phase 1: Extract Thread-Safe State Holders
+### Phase 1: Extract Thread-Safe State Holders - COMPLETED
 
-**Files to create:**
-- `internal/app/backup_state.go` - Extract `backupMu`, `backupRunning`, `backupCancel`, `backupProgress`
-- `internal/app/update_state.go` - Extract `updateMu`, `updateInProgress`, `availableVersion`
+**Status:** Completed in commit `a9cb50f`
 
-**Key types:**
+**Files created:**
+- `internal/app/backup_state.go` - Thread-safe backup state with `BackupState` struct
+- `internal/app/backup_state_test.go` - Comprehensive tests including concurrency
+- `internal/app/update_state.go` - Thread-safe update state with `UpdateState` struct
+- `internal/app/update_state_test.go` - Comprehensive tests including concurrency
+
+**Files modified:**
+- `main.go` - Replaced global mutex variables with state types
+- `main_test.go` - Updated tests to use new state types
+- `internal/updater/updater.go` - Added semver validation to prevent panic on dev builds
+- `internal/logging/applog.go` - Added `Sync()` method and sync before close for reliable logging
+
+**Implemented types:**
 ```go
 type BackupState struct {
     mu       sync.RWMutex
@@ -50,59 +60,88 @@ type BackupState struct {
     progress *restic.BackupProgress
 }
 
+// Methods: NewBackupState(), IsRunning(), SetRunning(), GetProgress(),
+// SetProgress(), StartBackup(), StopBackup(), Reset(), GetCancel()
+
 type UpdateState struct {
-    mu         sync.RWMutex
-    inProgress bool
-    available  string
+    mu               sync.RWMutex
+    inProgress       bool
+    availableVersion string
 }
+
+// Methods: NewUpdateState(), IsInProgress(), SetInProgress(),
+// GetAvailableVersion(), SetAvailableVersion(), TryStartUpdate(),
+// FinishUpdate(), HasUpdate(), ClearAvailableVersion()
 ```
 
-**Tests:** Thread-safety with concurrent access, state transitions.
+**Additional fixes included:**
+- Fixed race conditions in `setupMenu()`, `updateIcon()`, `reloadConfig()` for unprotected `backupRunning` reads
+- Fixed race condition for `availableVersion` access
+- Added `isValidSemver()` check in updater to skip update checks for dev builds (prevents panic)
+- Added `Sync()` to rotatingWriter to ensure logs are flushed before app exit
+
+**Tests:** All tests pass with `-race` flag. Coverage includes thread-safety with concurrent access, state transitions, and edge cases.
 
 ---
 
-### Phase 2: Extract Backup Orchestration
+### Phase 2: Extract Backup Orchestration - COMPLETED
 
-**Files to create:**
-- `internal/backup/orchestrator.go`
-- `internal/backup/notifier.go`
+**Status:** Completed
 
-**Key interfaces:**
+**Files created:**
+- `internal/backup/notifier.go` - Notifier interface with CompositeNotifier and NullNotifier implementations
+- `internal/backup/notifier_test.go` - Comprehensive notifier tests
+- `internal/backup/orchestrator.go` - Orchestrator struct coordinating backup execution
+- `internal/backup/orchestrator_test.go` - Orchestrator tests (unit tests, no restic execution)
+- `internal/backup/tailscale_adapter.go` - TailscaleProvider adapter for tailscale.Manager
+
+**Files modified:**
+- `main.go` - Replaced 170-line `runBackup()` with 80-line version using orchestrator
+- Removed unused `initTailscale()` function
+- Removed unused `tailscaleMgr` global variable
+- Removed unused imports (`io`, `errors`, `healthchecks`, `pushover`)
+
+**Implemented interfaces:**
 ```go
 type Notifier interface {
     NotifyStart() error
-    NotifySuccess() error
-    NotifyFailure(err error, logs string) error
+    NotifySuccess(message string) error
+    NotifyFailure(errMsg string, logs string) error
 }
 
 type TailscaleProvider interface {
     Connect(ctx context.Context) (proxyAddr string, err error)
     Disconnect() error
 }
-
-type StateRecorder interface {
-    RecordSuccess()
-    RecordFailure(err error)
-    Save() error
-}
 ```
 
-**Key type:**
+**Key types:**
 ```go
 type Orchestrator struct {
-    cfg       *config.Config
-    notifier  Notifier
-    tailscale TailscaleProvider
-    state     StateRecorder
-    progress  func(*restic.BackupProgress)
+    cfg        *config.Config
+    state      *state.State
+    notifier   Notifier
+    tailscale  TailscaleProvider
+    onProgress ProgressCallback
+}
+
+type Result struct {
+    Success   bool
+    Cancelled bool
+    Error     error
+    LogPath   string
 }
 
 func (o *Orchestrator) Run(ctx context.Context) Result
 ```
 
-**Migration:** Extract `runBackup()` (175 lines) logic into `Orchestrator.Run()`.
+**Additional implementations:**
+- `CompositeNotifier` - Combines healthchecks and pushover notifications
+- `NullNotifier` - No-op implementation for testing
+- `TailscaleAdapter` - Adapts tailscale.Manager to TailscaleProvider interface
+- Functional options pattern: `WithNotifier()`, `WithTailscale()`, `WithProgressCallback()`
 
-**Tests:** Success path, Tailscale failure, backup failure with retries, cancellation.
+**Tests:** All tests pass with `-race` flag
 
 ---
 
@@ -289,24 +328,25 @@ func onExit() {
 
 ## New Files to Create
 
-| File | Purpose |
-|------|---------|
-| `internal/app/app.go` | Main App struct and lifecycle |
-| `internal/app/app_test.go` | App unit tests |
-| `internal/app/backup_state.go` | Thread-safe backup state |
-| `internal/app/backup_state_test.go` | Backup state tests |
-| `internal/app/update_state.go` | Thread-safe update state |
-| `internal/app/update_state_test.go` | Update state tests |
-| `internal/backup/orchestrator.go` | Backup orchestration |
-| `internal/backup/orchestrator_test.go` | Orchestrator tests |
-| `internal/backup/notifier.go` | Notification composition |
-| `internal/backup/notifier_test.go` | Notifier tests |
-| `internal/tray/menu.go` | Menu setup and events |
-| `internal/tray/menu_test.go` | Menu tests |
-| `internal/tray/icon.go` | Icon state logic |
-| `internal/tray/icon_test.go` | Icon tests |
-| `internal/updater/orchestrator.go` | Auto-update orchestration |
-| `internal/updater/orchestrator_test.go` | Update orchestrator tests |
+| File | Purpose | Status |
+|------|---------|--------|
+| `internal/app/app.go` | Main App struct and lifecycle | Pending (Phase 4) |
+| `internal/app/app_test.go` | App unit tests | Pending (Phase 4) |
+| `internal/app/backup_state.go` | Thread-safe backup state | ✅ Created |
+| `internal/app/backup_state_test.go` | Backup state tests | ✅ Created |
+| `internal/app/update_state.go` | Thread-safe update state | ✅ Created |
+| `internal/app/update_state_test.go` | Update state tests | ✅ Created |
+| `internal/backup/orchestrator.go` | Backup orchestration | ✅ Created |
+| `internal/backup/orchestrator_test.go` | Orchestrator tests | ✅ Created |
+| `internal/backup/notifier.go` | Notification composition | ✅ Created |
+| `internal/backup/notifier_test.go` | Notifier tests | ✅ Created |
+| `internal/backup/tailscale_adapter.go` | TailscaleProvider adapter | ✅ Created |
+| `internal/tray/menu.go` | Menu setup and events | Pending (Phase 3) |
+| `internal/tray/menu_test.go` | Menu tests | Pending (Phase 3) |
+| `internal/tray/icon.go` | Icon state logic | Pending (Phase 3) |
+| `internal/tray/icon_test.go` | Icon tests | Pending (Phase 3) |
+| `internal/updater/orchestrator.go` | Auto-update orchestration | Pending (Phase 5) |
+| `internal/updater/orchestrator_test.go` | Update orchestrator tests | Pending (Phase 5) |
 
 ## Testing Strategy
 

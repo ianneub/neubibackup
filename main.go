@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,15 +12,13 @@ import (
 	"neubibackup/assets"
 	"neubibackup/internal/app"
 	"neubibackup/internal/autostart"
+	"neubibackup/internal/backup"
 	"neubibackup/internal/config"
-	"neubibackup/internal/healthchecks"
 	"neubibackup/internal/logging"
 	"neubibackup/internal/power"
-	"neubibackup/internal/pushover"
 	"neubibackup/internal/restic"
 	"neubibackup/internal/scheduler"
 	"neubibackup/internal/state"
-	"neubibackup/internal/tailscale"
 	"neubibackup/internal/tray"
 	"neubibackup/internal/updater"
 
@@ -41,7 +37,6 @@ var (
 	autostartMgr  *autostart.Manager
 	powerWatcher  *power.Watcher
 	configWatcher *fsnotify.Watcher
-	tailscaleMgr  *tailscale.Manager
 	statusTicker  *time.Ticker
 
 	// Context for graceful shutdown
@@ -177,26 +172,6 @@ func onReady() {
 			}
 		}
 	}()
-}
-
-func initTailscale() error {
-	tsDir, err := config.GetTailscaleDir()
-	if err != nil {
-		return err
-	}
-
-	tailscaleMgr, err = tailscale.New(&cfg.Tailscale, tsDir)
-	if err != nil {
-		return err
-	}
-
-	// Start with a timeout
-	if err := tailscaleMgr.Start(appCtx); err != nil {
-		tailscaleMgr = nil
-		return err
-	}
-
-	return nil
 }
 
 func handleFirstRun() error {
@@ -414,74 +389,22 @@ func runBackup() {
 		}
 	}()
 
-	log.Println("Starting backup...")
-
-	// Connect Tailscale on-demand if enabled
-	var proxyAddr string
+	// Create Tailscale provider if enabled
+	var tailscaleProvider backup.TailscaleProvider
 	if cfg.IsTailscaleEnabled() {
-		log.Println("Connecting to Tailscale...")
-		if err := initTailscale(); err != nil {
-			log.Printf("Tailscale connection failed: %v", err)
-			// Create healthchecks client for failure reporting
-			var hc *healthchecks.Client
-			if cfg.Healthchecks.Enabled && cfg.Healthchecks.PingURL != "" {
-				hc = healthchecks.New(cfg.Healthchecks.PingURL)
-			}
-			recordFailure(fmt.Errorf("tailscale connection failed: %w", err), hc)
-			if hc != nil {
-				hc.Fail("Tailscale connection failed: " + err.Error())
-			}
-			// Send Pushover notification
-			if cfg.Pushover.Enabled && cfg.Pushover.OnFailure {
-				po := pushover.New(cfg.Pushover.APIToken, cfg.Pushover.UserKey)
-				if err := po.SendFailure("Tailscale connection failed: " + err.Error()); err != nil {
-					log.Printf("Warning: pushover notification failed: %v", err)
-				}
-			}
-			return
-		}
-		proxyAddr = tailscaleMgr.ProxyAddr()
-		log.Printf("Tailscale connected, using proxy: %s", proxyAddr)
-
-		// Disconnect Tailscale when backup completes
-		defer func() {
-			log.Println("Disconnecting from Tailscale...")
-			if tailscaleMgr != nil {
-				if err := tailscaleMgr.Close(); err != nil {
-					log.Printf("Warning: Tailscale shutdown error: %v", err)
-				}
-				tailscaleMgr = nil
-			}
-		}()
-	}
-
-	// Create healthchecks client
-	var hc *healthchecks.Client
-	if cfg.Healthchecks.Enabled && cfg.Healthchecks.PingURL != "" {
-		hc = healthchecks.New(cfg.Healthchecks.PingURL)
-	}
-
-	// Ping start
-	if hc != nil {
-		if err := hc.Start(); err != nil {
-			log.Printf("Warning: healthchecks start ping failed: %v", err)
+		tsDir, err := config.GetTailscaleDir()
+		if err != nil {
+			log.Printf("Failed to get Tailscale directory: %v", err)
+		} else {
+			tailscaleProvider = backup.NewTailscaleAdapter(&cfg.Tailscale, tsDir)
 		}
 	}
 
-	// Create log file
-	logFile, err := logging.CreateLogFile()
-	if err != nil {
-		log.Printf("Error creating log file: %v", err)
-		recordFailure(err, hc)
-		return
-	}
-	defer logFile.Close()
-
-	// Write to both log file and stdout
-	logWriter := io.MultiWriter(logFile, os.Stdout)
-
-	// Record attempt time
-	appState.LastBackupAttempt = appState.LastBackupSuccess // Will be updated after
+	// Create notifier
+	notifier := backup.NewCompositeNotifier(backup.NotifierConfig{
+		Healthchecks: cfg.Healthchecks,
+		Pushover:     cfg.Pushover,
+	})
 
 	// Progress callback for UI updates
 	onProgress := func(progress restic.BackupProgress) {
@@ -489,70 +412,22 @@ func runBackup() {
 		updateStatus()
 	}
 
-	// Run backup
-	err = restic.RunBackup(ctx, cfg, logWriter, proxyAddr, onProgress)
+	// Create and run orchestrator
+	orchestrator := backup.NewOrchestrator(cfg, appState,
+		backup.WithNotifier(notifier),
+		backup.WithTailscale(tailscaleProvider),
+		backup.WithProgressCallback(onProgress),
+	)
 
-	if err != nil {
-		// Check if backup was manually cancelled by user
-		if errors.Is(err, context.Canceled) {
-			log.Println("Backup was cancelled by user")
-			return
-		}
+	result := orchestrator.Run(ctx)
 
-		log.Printf("Backup failed: %v", err)
-		recordFailure(err, hc)
-
-		// Send logs on failure if configured
-		if hc != nil && cfg.Healthchecks.SendLogsOnFailure {
-			logFile.Seek(0, 0)
-			logData, _ := io.ReadAll(logFile)
-			hc.Fail(string(logData))
-		} else if hc != nil {
-			hc.Fail("")
-		}
-
-		// Send Pushover notification
-		if cfg.Pushover.Enabled && cfg.Pushover.OnFailure {
-			po := pushover.New(cfg.Pushover.APIToken, cfg.Pushover.UserKey)
-			if err := po.SendFailure(err.Error()); err != nil {
-				log.Printf("Warning: pushover notification failed: %v", err)
-			}
-		}
-
+	if result.Cancelled {
+		log.Println("Backup was cancelled by user")
 		return
 	}
 
-	// Success
-	log.Println("Backup completed successfully")
-	appState.RecordSuccess()
-	if err := appState.Save(); err != nil {
-		log.Printf("Error saving state: %v", err)
-	}
-
-	if hc != nil {
-		if err := hc.Success(); err != nil {
-			log.Printf("Warning: healthchecks success ping failed: %v", err)
-		}
-	}
-
-	// Send success notification if configured
-	if cfg.Pushover.Enabled && cfg.Pushover.OnSuccess {
-		po := pushover.New(cfg.Pushover.APIToken, cfg.Pushover.UserKey)
-		if err := po.SendSuccess("Backup completed successfully"); err != nil {
-			log.Printf("Warning: pushover notification failed: %v", err)
-		}
-	}
-
-	// Cleanup old logs
-	if err := logging.CleanupOldLogs(); err != nil {
-		log.Printf("Warning: log cleanup failed: %v", err)
-	}
-}
-
-func recordFailure(err error, hc *healthchecks.Client) {
-	appState.RecordFailure(err)
-	if saveErr := appState.Save(); saveErr != nil {
-		log.Printf("Error saving state: %v", saveErr)
+	if !result.Success {
+		log.Printf("Backup failed: %v", result.Error)
 	}
 }
 
@@ -938,13 +813,6 @@ func onExit() {
 
 	// Cancel any running backup
 	backupState.StopBackup()
-
-	// Close Tailscale if still connected (safety net for mid-backup exit)
-	if tailscaleMgr != nil {
-		if err := tailscaleMgr.Close(); err != nil {
-			log.Printf("Warning: Tailscale shutdown error: %v", err)
-		}
-	}
 
 	// Stop power watcher
 	if powerWatcher != nil {

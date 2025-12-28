@@ -386,6 +386,85 @@ backup:
 	}
 }
 
+func TestLoadFromFile_TailscaleConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `version: 1
+schedule:
+  time: "01:00"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+tailscale:
+  enabled: true
+  auth_key: "tskey-auth-test123"
+  hostname: "mybackup"
+`
+
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadFromFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile() error = %v", err)
+	}
+
+	if !cfg.Tailscale.Enabled {
+		t.Error("Tailscale.Enabled should be true")
+	}
+	if cfg.Tailscale.AuthKey != "tskey-auth-test123" {
+		t.Errorf("Tailscale.AuthKey = %q, want %q", cfg.Tailscale.AuthKey, "tskey-auth-test123")
+	}
+	if cfg.Tailscale.Hostname != "mybackup" {
+		t.Errorf("Tailscale.Hostname = %q, want %q", cfg.Tailscale.Hostname, "mybackup")
+	}
+}
+
+func TestLoadFromFile_TailscaleBackwardCompatibility(t *testing.T) {
+	// Test that old config files with 'ephemeral' field are still parsed
+	// (the field is ignored but shouldn't cause an error)
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `version: 1
+schedule:
+  time: "01:00"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+tailscale:
+  enabled: true
+  auth_key: "tskey-auth-test123"
+  hostname: "mybackup"
+  ephemeral: true
+`
+
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadFromFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile() should not error on old config with ephemeral: %v", err)
+	}
+
+	// Verify the other fields still work
+	if !cfg.Tailscale.Enabled {
+		t.Error("Tailscale.Enabled should be true")
+	}
+	if cfg.Tailscale.AuthKey != "tskey-auth-test123" {
+		t.Errorf("Tailscale.AuthKey = %q, want %q", cfg.Tailscale.AuthKey, "tskey-auth-test123")
+	}
+}
+
 func TestLoadFromFile_NotFound(t *testing.T) {
 	_, err := LoadFromFile("/nonexistent/config.yaml")
 	if err == nil {

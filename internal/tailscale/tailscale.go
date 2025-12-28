@@ -42,7 +42,7 @@ func New(cfg *config.TailscaleConfig, stateDir string) (*Manager, error) {
 		Dir:       stateDir,
 		Hostname:  hostname,
 		AuthKey:   cfg.AuthKey,
-		Ephemeral: cfg.Ephemeral,
+		Ephemeral: false, // Always non-ephemeral for stable device registration
 		Logf: func(format string, args ...any) {
 			log.Printf("[tailscale] "+format, args...)
 		},

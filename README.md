@@ -117,11 +117,11 @@ pushover:
 
 # Optional: Tailscale integration
 # Enable this to access restic REST servers that are only reachable via Tailscale.
+# The device stays registered in your tailnet - auth key is only needed for initial setup.
 tailscale:
   enabled: false
   auth_key: ""               # Get from https://login.tailscale.com/admin/settings/keys
   hostname: "neubibackup"    # Hostname for this device in your tailnet
-  ephemeral: false           # Remove device from tailnet when app closes
 ```
 
 ### Setting Up a Repository

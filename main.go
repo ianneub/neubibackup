@@ -127,12 +127,7 @@ func onReady() {
 	// Start config file watcher
 	go watchConfigFile()
 
-	// Initialize Tailscale if configured
-	if cfg != nil && cfg.IsTailscaleEnabled() {
-		if err := initTailscale(); err != nil {
-			log.Printf("Warning: Tailscale initialization failed: %v", err)
-		}
-	}
+	// Note: Tailscale is now connected on-demand during backup, not at startup
 
 	// Initialize scheduler if configured
 	if cfg != nil && cfg.IsConfigured() {
@@ -413,6 +408,45 @@ func runBackup() {
 
 	log.Println("Starting backup...")
 
+	// Connect Tailscale on-demand if enabled
+	var proxyAddr string
+	if cfg.IsTailscaleEnabled() {
+		log.Println("Connecting to Tailscale...")
+		if err := initTailscale(); err != nil {
+			log.Printf("Tailscale connection failed: %v", err)
+			// Create healthchecks client for failure reporting
+			var hc *healthchecks.Client
+			if cfg.Healthchecks.Enabled && cfg.Healthchecks.PingURL != "" {
+				hc = healthchecks.New(cfg.Healthchecks.PingURL)
+			}
+			recordFailure(fmt.Errorf("tailscale connection failed: %w", err), hc)
+			if hc != nil {
+				hc.Fail("Tailscale connection failed: " + err.Error())
+			}
+			// Send Pushover notification
+			if cfg.Pushover.Enabled && cfg.Pushover.OnFailure {
+				po := pushover.New(cfg.Pushover.APIToken, cfg.Pushover.UserKey)
+				if err := po.SendFailure("Tailscale connection failed: " + err.Error()); err != nil {
+					log.Printf("Warning: pushover notification failed: %v", err)
+				}
+			}
+			return
+		}
+		proxyAddr = tailscaleMgr.ProxyAddr()
+		log.Printf("Tailscale connected, using proxy: %s", proxyAddr)
+
+		// Disconnect Tailscale when backup completes
+		defer func() {
+			log.Println("Disconnecting from Tailscale...")
+			if tailscaleMgr != nil {
+				if err := tailscaleMgr.Close(); err != nil {
+					log.Printf("Warning: Tailscale shutdown error: %v", err)
+				}
+				tailscaleMgr = nil
+			}
+		}()
+	}
+
 	// Create healthchecks client
 	var hc *healthchecks.Client
 	if cfg.Healthchecks.Enabled && cfg.Healthchecks.PingURL != "" {
@@ -440,15 +474,6 @@ func runBackup() {
 
 	// Record attempt time
 	appState.LastBackupAttempt = appState.LastBackupSuccess // Will be updated after
-
-	// Get Tailscale proxy address if available
-	var proxyAddr string
-	if tailscaleMgr != nil && tailscaleMgr.IsStarted() {
-		proxyAddr = tailscaleMgr.ProxyAddr()
-		if proxyAddr != "" {
-			log.Printf("Using Tailscale proxy: %s", proxyAddr)
-		}
-	}
 
 	// Progress callback for UI updates
 	onProgress := func(progress restic.BackupProgress) {
@@ -637,8 +662,6 @@ func reloadConfig() {
 	}
 	backupMu.Unlock()
 
-	oldTsEnabled := cfg != nil && cfg.IsTailscaleEnabled()
-
 	newCfg, err := config.Load()
 	if err != nil {
 		log.Printf("Error reloading config: %v", err)
@@ -646,24 +669,9 @@ func reloadConfig() {
 	}
 
 	cfg = newCfg
-	newTsEnabled := cfg.IsTailscaleEnabled()
 
-	// Handle Tailscale config changes
-	if !oldTsEnabled && newTsEnabled {
-		// Tailscale newly enabled
-		log.Println("Tailscale enabled, initializing...")
-		if err := initTailscale(); err != nil {
-			log.Printf("Warning: Tailscale initialization failed: %v", err)
-		}
-	} else if oldTsEnabled && !newTsEnabled {
-		// Tailscale disabled
-		log.Println("Tailscale disabled, shutting down...")
-		if tailscaleMgr != nil {
-			tailscaleMgr.Close()
-			tailscaleMgr = nil
-		}
-	}
-	// Note: Auth key changes require app restart
+	// Note: Tailscale is now connected on-demand during backup,
+	// so config changes take effect on the next backup run
 
 	// Update scheduler if it exists
 	if sched != nil {
@@ -920,7 +928,7 @@ func onExit() {
 	}
 	backupMu.Unlock()
 
-	// Close Tailscale
+	// Close Tailscale if still connected (safety net for mid-backup exit)
 	if tailscaleMgr != nil {
 		if err := tailscaleMgr.Close(); err != nil {
 			log.Printf("Warning: Tailscale shutdown error: %v", err)

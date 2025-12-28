@@ -7,7 +7,7 @@ import (
 
 // DefaultConfigTemplate is the template for a new config file with helpful comments.
 const DefaultConfigTemplate = `# NeubiBackup Configuration
-# Documentation: https://github.com/yourusername/neubibackup
+# Documentation: https://github.com/ianneub/neubibackup
 version: 1
 
 # Schedule settings
@@ -73,6 +73,7 @@ pushover:
 
 # Tailscale integration (optional)
 # Enable this to access restic REST servers that are only reachable via Tailscale.
+# The device stays registered in your tailnet - auth key is only needed for initial setup.
 tailscale:
   enabled: false
   # Auth key for headless login (get from https://login.tailscale.com/admin/settings/keys)
@@ -80,9 +81,6 @@ tailscale:
   auth_key: ""
   # Hostname for this device in your tailnet (defaults to "neubibackup")
   hostname: "neubibackup"
-  # Ephemeral mode: device is removed from tailnet when app closes
-  # Recommended: false (keeps device registered for easier management)
-  ephemeral: false
 
 # Note: state.yaml and logs/ are stored in ~/neubibackup/ alongside this config
 `

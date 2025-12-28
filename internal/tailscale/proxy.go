@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"tailscale.com/tsnet"
 )
@@ -18,6 +19,8 @@ type Proxy struct {
 	wg       sync.WaitGroup
 	closed   bool
 	mu       sync.Mutex
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 // NewProxy creates a new SOCKS5 proxy that routes through the given tsnet server.
@@ -30,6 +33,8 @@ func NewProxy(server *tsnet.Server) *Proxy {
 // Start begins listening for SOCKS5 connections on a random local port.
 // Returns the address the proxy is listening on (e.g., "127.0.0.1:12345").
 func (p *Proxy) Start() (string, error) {
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", fmt.Errorf("listen: %w", err)
@@ -52,6 +57,11 @@ func (p *Proxy) Close() error {
 	}
 	p.closed = true
 	p.mu.Unlock()
+
+	// Cancel context to unblock any io.Copy operations in active connections
+	if p.cancel != nil {
+		p.cancel()
+	}
 
 	if p.listener != nil {
 		p.listener.Close()
@@ -215,6 +225,14 @@ func (p *Proxy) handleConnection(conn net.Conn) {
 	// Proxy data bidirectionally
 	var wg sync.WaitGroup
 	wg.Add(2)
+
+	// Watch for context cancellation to unblock io.Copy operations during shutdown
+	go func() {
+		<-p.ctx.Done()
+		// Set short deadline to unblock io.Copy
+		conn.SetDeadline(time.Now().Add(100 * time.Millisecond))
+		targetConn.SetDeadline(time.Now().Add(100 * time.Millisecond))
+	}()
 
 	go func() {
 		defer wg.Done()

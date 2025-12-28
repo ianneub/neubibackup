@@ -105,19 +105,30 @@ func (pw *ProgressWriter) Write(p []byte) (n int, err error) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 
-	// Process byte by byte to handle line buffering
-	for _, b := range p {
-		if b == '\n' {
-			line := pw.lineBuffer.String()
-			pw.lineBuffer.Reset()
-			pw.processLine(line)
-		} else {
-			pw.lineBuffer.WriteByte(b)
+	originalLen := len(p)
+
+	// Process using efficient line scanning with bytes.IndexByte
+	// This uses SIMD/vectorized CPU instructions instead of byte-by-byte iteration
+	for len(p) > 0 {
+		idx := bytes.IndexByte(p, '\n')
+		if idx == -1 {
+			// No newline found, buffer remaining bytes
+			pw.lineBuffer.Write(p)
+			break
 		}
+
+		// Append bytes up to newline to buffer and process
+		pw.lineBuffer.Write(p[:idx])
+		line := pw.lineBuffer.String()
+		pw.lineBuffer.Reset()
+		pw.processLine(line)
+
+		// Move past the newline
+		p = p[idx+1:]
 	}
 
 	// Return the original length to indicate all bytes were "consumed"
-	return len(p), nil
+	return originalLen, nil
 }
 
 // processLine handles a complete line of output from restic.

@@ -176,12 +176,27 @@ jobs:
 
           # Create the DMG using a writable image first, then convert
           # This approach is more reliable on constrained disk space
-          hdiutil create -volname "NeubiBackup" \
-            -srcfolder dmg_contents \
-            -fs HFS+ \
-            -size ${DMG_SIZE} \
-            -ov -format UDRW \
-            temp.dmg
+          # Use retry logic to handle transient "Resource busy" errors on GitHub Actions
+          for attempt in 1 2 3 4 5; do
+            echo "Attempt $attempt: Creating DMG..."
+            if hdiutil create -volname "NeubiBackup" \
+              -srcfolder dmg_contents \
+              -fs HFS+ \
+              -size ${DMG_SIZE} \
+              -ov -format UDRW \
+              temp.dmg; then
+              echo "DMG created successfully on attempt $attempt"
+              break
+            else
+              echo "Attempt $attempt failed"
+              if [ $attempt -eq 5 ]; then
+                echo "All attempts failed"
+                exit 1
+              fi
+              echo "Waiting 5 seconds before retry..."
+              sleep 5
+            fi
+          done
 
           # Convert to compressed read-only format
           hdiutil convert temp.dmg -format UDZO -o NeubiBackup-${{ matrix.arch_name }}.dmg

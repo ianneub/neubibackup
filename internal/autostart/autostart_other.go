@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package autostart manages launching the application at system login.
 package autostart
 

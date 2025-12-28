@@ -198,6 +198,16 @@ The app detects missed backups when:
 
 Make sure the app is set to **Start at Login** for reliable scheduling.
 
+### Windows autostart not working
+
+NeubiBackup uses Windows Task Scheduler for automatic startup, which allows the app to start with administrator privileges needed for VSS snapshots.
+
+If "Start at Login" isn't working:
+
+1. Open Task Scheduler (search for it in the Start menu)
+2. Look for "NeubiBackup" task in the Task Scheduler Library
+3. If missing, toggle the "Start at Login" option off and on in the tray menu
+
 ## Automatic Updates
 
 NeubiBackup checks for updates automatically every 24 hours and on startup. Updates are applied silently in the background:

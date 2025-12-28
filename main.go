@@ -92,6 +92,9 @@ func onReady() {
 	// Clean up old update artifacts on Windows
 	cleanupOldUpdates()
 
+	// Clean up old autostart shortcut on Windows (migration from go-autostart to Task Scheduler)
+	cleanupOldAutostartShortcut()
+
 	// Initialize autostart manager
 	autostartMgr, err = autostart.New()
 	if err != nil {
@@ -749,6 +752,32 @@ func cleanupOldUpdates() {
 			log.Printf("Could not remove old update file %s: %v", old, err)
 		} else {
 			log.Printf("Removed old update file: %s", old)
+		}
+	}
+}
+
+// cleanupOldAutostartShortcut removes the old Startup folder shortcut on Windows.
+// Previous versions used go-autostart which creates a .lnk file in the Startup folder,
+// but that doesn't work with apps requiring admin privileges. We now use Task Scheduler.
+func cleanupOldAutostartShortcut() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		return
+	}
+
+	shortcutPath := filepath.Join(appData,
+		"Microsoft", "Windows", "Start Menu", "Programs", "Startup",
+		"NeubiBackup.lnk")
+
+	if _, err := os.Stat(shortcutPath); err == nil {
+		if err := os.Remove(shortcutPath); err != nil {
+			log.Printf("Warning: could not remove old autostart shortcut: %v", err)
+		} else {
+			log.Println("Removed old autostart shortcut from Startup folder")
 		}
 	}
 }

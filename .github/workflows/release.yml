@@ -323,6 +323,9 @@ jobs:
             Delete "$SMPROGRAMS\NeubiBackup\Uninstall.lnk"
             RMDir "$SMPROGRAMS\NeubiBackup"
 
+            ; Remove Task Scheduler entry for autostart
+            nsExec::ExecToLog 'schtasks /Delete /TN "NeubiBackup" /F'
+
             ; Remove from Add/Remove Programs
             DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NeubiBackup"
           SectionEnd

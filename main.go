@@ -88,6 +88,16 @@ func onReady() {
 		log.Printf("Warning: could not initialize autostart: %v", err)
 	}
 
+	// Load state early (needed for macOS FDA check)
+	appState, err = state.Load()
+	if err != nil {
+		log.Printf("Error loading state: %v", err)
+		appState = &state.State{}
+	}
+
+	// macOS: Prompt for Full Disk Access if not already granted
+	handleMacOSFirstRun()
+
 	// Check for first run
 	exists, err := config.ConfigExists()
 	if err != nil {
@@ -105,13 +115,6 @@ func onReady() {
 		if err != nil {
 			log.Printf("Error loading config: %v", err)
 		}
-	}
-
-	// Load state
-	appState, err = state.Load()
-	if err != nil {
-		log.Printf("Error loading state: %v", err)
-		appState = &state.State{}
 	}
 
 	// Set initial icon based on configuration state

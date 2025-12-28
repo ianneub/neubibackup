@@ -1,6 +1,6 @@
 # NeubiBackup
 
-[![Test](https://github.com/ianneub/neubibackup/actions/workflows/ci.yml/badge.svg)](https://github.com/ianneub/neubibackup/actions/workflows/ci.yml)
+[![Test](https://github.com/ianneub/neubibackup/actions/workflows/test.yml/badge.svg)](https://github.com/ianneub/neubibackup/actions/workflows/test.yml)
 
 A simple system tray application that automatically backs up your files using [restic](https://restic.net/).
 

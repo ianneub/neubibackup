@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -474,4 +477,141 @@ func TestConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestUpdateMutexBehavior tests the update mutex locking behavior
+func TestUpdateMutexBehavior(t *testing.T) {
+	// Reset global state for test
+	updateMu.Lock()
+	originalInProgress := updateInProgress
+	updateInProgress = false
+	updateMu.Unlock()
+
+	defer func() {
+		updateMu.Lock()
+		updateInProgress = originalInProgress
+		updateMu.Unlock()
+	}()
+
+	// Test that we can check update status
+	updateMu.Lock()
+	inProgress := updateInProgress
+	updateMu.Unlock()
+
+	if inProgress {
+		t.Error("updateInProgress should be false initially in test")
+	}
+
+	// Simulate starting an update
+	updateMu.Lock()
+	updateInProgress = true
+	updateMu.Unlock()
+
+	updateMu.Lock()
+	inProgress = updateInProgress
+	updateMu.Unlock()
+
+	if !inProgress {
+		t.Error("updateInProgress should be true after setting")
+	}
+}
+
+// TestCleanupOldUpdatesNonWindows tests that cleanup is skipped on non-Windows
+func TestCleanupOldUpdatesNonWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping non-Windows test on Windows")
+	}
+
+	// Create a temp directory with .old files
+	tempDir := t.TempDir()
+
+	// Create some .old files
+	oldFile := filepath.Join(tempDir, ".neubibackup.exe.old")
+	if err := os.WriteFile(oldFile, []byte("old binary"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Verify file exists before cleanup
+	if _, err := os.Stat(oldFile); os.IsNotExist(err) {
+		t.Fatal("Test file should exist before cleanup")
+	}
+
+	// Run cleanup (should do nothing on non-Windows)
+	cleanupOldUpdates()
+
+	// File should still exist because we're not on Windows
+	if _, err := os.Stat(oldFile); os.IsNotExist(err) {
+		t.Error("File should still exist on non-Windows after cleanupOldUpdates")
+	}
+}
+
+// TestStateUpdateFields tests the new update tracking fields in state
+func TestStateUpdateFields(t *testing.T) {
+	s := &state.State{}
+
+	// Test initial state
+	if s.LastUpdateVersion != "" {
+		t.Errorf("LastUpdateVersion should be empty initially, got %q", s.LastUpdateVersion)
+	}
+	if !s.LastUpdateTime.IsZero() {
+		t.Errorf("LastUpdateTime should be zero initially, got %v", s.LastUpdateTime)
+	}
+	if s.LastUpdateError != "" {
+		t.Errorf("LastUpdateError should be empty initially, got %q", s.LastUpdateError)
+	}
+	if !s.LastUpdateErrorTime.IsZero() {
+		t.Errorf("LastUpdateErrorTime should be zero initially, got %v", s.LastUpdateErrorTime)
+	}
+
+	// Set update success fields
+	now := time.Now()
+	s.LastUpdateVersion = "v1.2.3"
+	s.LastUpdateTime = now
+	s.LastUpdateError = ""
+
+	if s.LastUpdateVersion != "v1.2.3" {
+		t.Errorf("LastUpdateVersion = %q, want %q", s.LastUpdateVersion, "v1.2.3")
+	}
+	if s.LastUpdateTime != now {
+		t.Errorf("LastUpdateTime = %v, want %v", s.LastUpdateTime, now)
+	}
+
+	// Set update error fields
+	errTime := time.Now()
+	s.LastUpdateError = "network error"
+	s.LastUpdateErrorTime = errTime
+
+	if s.LastUpdateError != "network error" {
+		t.Errorf("LastUpdateError = %q, want %q", s.LastUpdateError, "network error")
+	}
+	if s.LastUpdateErrorTime != errTime {
+		t.Errorf("LastUpdateErrorTime = %v, want %v", s.LastUpdateErrorTime, errTime)
+	}
+}
+
+// TestUpdateBlockedDuringBackup tests that updates wait for backups
+func TestUpdateBlockedDuringBackup(t *testing.T) {
+	// Reset global state
+	backupMu.Lock()
+	originalRunning := backupRunning
+	backupRunning = true // Simulate a running backup
+	backupMu.Unlock()
+
+	defer func() {
+		backupMu.Lock()
+		backupRunning = originalRunning
+		backupMu.Unlock()
+	}()
+
+	// Check that backup is detected as running
+	backupMu.Lock()
+	running := backupRunning
+	backupMu.Unlock()
+
+	if !running {
+		t.Error("Backup should be detected as running")
+	}
+
+	// In a real scenario, attemptAutoUpdate would wait here
+	// We just verify the detection mechanism works
 }

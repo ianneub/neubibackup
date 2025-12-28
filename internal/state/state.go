@@ -19,7 +19,11 @@ type State struct {
 	ConsecutiveFailures int       `yaml:"consecutive_failures"`
 
 	// Update tracking
-	LastUpdateCheck time.Time `yaml:"last_update_check,omitempty"`
+	LastUpdateCheck     time.Time `yaml:"last_update_check,omitempty"`
+	LastUpdateVersion   string    `yaml:"last_update_version,omitempty"`
+	LastUpdateTime      time.Time `yaml:"last_update_time,omitempty"`
+	LastUpdateError     string    `yaml:"last_update_error,omitempty"`
+	LastUpdateErrorTime time.Time `yaml:"last_update_error_time,omitempty"`
 }
 
 // Load reads the state from the default state file.

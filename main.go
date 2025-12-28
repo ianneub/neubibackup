@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -63,6 +65,10 @@ var (
 	appUpdater       *updater.Updater
 	availableVersion string
 	updateTicker     *time.Ticker
+
+	// Auto-update state
+	updateMu         sync.Mutex
+	updateInProgress bool
 )
 
 func main() {
@@ -71,6 +77,9 @@ func main() {
 
 func onReady() {
 	appCtx, appCancel = context.WithCancel(context.Background())
+
+	// Clean up old update artifacts on Windows
+	cleanupOldUpdates()
 
 	// Initialize autostart manager
 	var err error
@@ -681,6 +690,35 @@ func reloadConfig() {
 
 // Update checking functions
 
+// cleanupOldUpdates removes old update artifacts left by go-selfupdate on Windows.
+// On Windows, the old executable is renamed to .old rather than deleted.
+func cleanupOldUpdates() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+
+	dir := filepath.Dir(exe)
+	pattern := filepath.Join(dir, ".*.old")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return
+	}
+
+	for _, old := range matches {
+		if err := os.Remove(old); err != nil {
+			// File might still be locked, that's OK - we'll try again next time
+			log.Printf("Could not remove old update file %s: %v", old, err)
+		} else {
+			log.Printf("Removed old update file: %s", old)
+		}
+	}
+}
+
 func checkForUpdatesIfNeeded() {
 	// Skip if we checked recently (within 24 hours)
 	if time.Since(appState.LastUpdateCheck) < 24*time.Hour {
@@ -723,8 +761,101 @@ func checkForUpdates() {
 		mUpdateStatus.SetTitle(fmt.Sprintf("Update Available (%s)", newVersion))
 		mUpdateStatus.Enable()
 		log.Printf("Update available: %s", newVersion)
+
+		// Trigger automatic update in background
+		go attemptAutoUpdate(newVersion)
 	} else {
 		log.Println("No update available")
+	}
+}
+
+// attemptAutoUpdate tries to apply an update automatically in the background.
+// It waits for any running backup to complete before applying.
+func attemptAutoUpdate(version string) {
+	updateMu.Lock()
+	if updateInProgress {
+		updateMu.Unlock()
+		log.Println("Auto-update: already in progress, skipping")
+		return
+	}
+	updateInProgress = true
+	updateMu.Unlock()
+
+	defer func() {
+		updateMu.Lock()
+		updateInProgress = false
+		updateMu.Unlock()
+	}()
+
+	// Wait for backup to complete if running (with timeout)
+	waitStart := time.Now()
+	maxWait := 2 * time.Hour
+
+	for {
+		backupMu.Lock()
+		running := backupRunning
+		backupMu.Unlock()
+
+		if !running {
+			break
+		}
+
+		if time.Since(waitStart) > maxWait {
+			log.Println("Auto-update: gave up waiting for backup to complete")
+			return
+		}
+
+		log.Println("Auto-update: waiting for backup to complete...")
+		select {
+		case <-appCtx.Done():
+			return
+		case <-time.After(30 * time.Second):
+			// Continue waiting
+		}
+	}
+
+	// Check if we're still supposed to run
+	select {
+	case <-appCtx.Done():
+		return
+	default:
+	}
+
+	// Apply the update
+	log.Printf("Auto-update: applying update to %s...", version)
+	mUpdateStatus.SetTitle("Updating...")
+	mUpdateStatus.Disable()
+
+	if err := appUpdater.DownloadAndApply(appCtx); err != nil {
+		log.Printf("Auto-update failed: %v", err)
+		mUpdateStatus.SetTitle(fmt.Sprintf("Update failed (%s)", version))
+		mUpdateStatus.Enable()
+
+		// Record error in state
+		appState.LastUpdateError = err.Error()
+		appState.LastUpdateErrorTime = time.Now()
+		if saveErr := appState.Save(); saveErr != nil {
+			log.Printf("Error saving state: %v", saveErr)
+		}
+		return
+	}
+
+	// Update succeeded
+	log.Printf("Auto-update: successfully updated to %s, restarting...", version)
+
+	// Record successful update
+	appState.LastUpdateVersion = version
+	appState.LastUpdateTime = time.Now()
+	appState.LastUpdateError = ""
+	if err := appState.Save(); err != nil {
+		log.Printf("Error saving state: %v", err)
+	}
+
+	// Restart the application
+	if err := updater.Restart(); err != nil {
+		log.Printf("Auto-update: restart failed: %v", err)
+		mUpdateStatus.SetTitle("Updated - please restart manually")
+		mUpdateStatus.Enable()
 	}
 }
 
@@ -751,12 +882,24 @@ func installUpdate() {
 		return
 	}
 
-	// Update succeeded - the app should restart
+	// Update succeeded
 	log.Println("Update installed successfully, restarting...")
 	mUpdateStatus.SetTitle("Update installed - restarting...")
 
-	// Quit the app so it can restart with the new version
-	systray.Quit()
+	// Record successful update
+	appState.LastUpdateVersion = availableVersion
+	appState.LastUpdateTime = time.Now()
+	appState.LastUpdateError = ""
+	if err := appState.Save(); err != nil {
+		log.Printf("Error saving state: %v", err)
+	}
+
+	// Restart the application
+	if err := updater.Restart(); err != nil {
+		log.Printf("Restart failed: %v", err)
+		mUpdateStatus.SetTitle("Updated - please restart manually")
+		mUpdateStatus.Enable()
+	}
 }
 
 func onExit() {

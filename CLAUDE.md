@@ -79,6 +79,14 @@ When adding new features or fixing bugs, always write tests:
 - Use table-driven tests for testing multiple cases
 - Run `go test ./...` to verify all tests pass before committing
 
+## Versioning
+
+This project uses [Semantic Versioning (semver)](https://semver.org/). All version numbers must follow the format `MAJOR.MINOR.PATCH`:
+
+- **MAJOR**: Incompatible API/config changes
+- **MINOR**: New functionality in a backward-compatible manner
+- **PATCH**: Backward-compatible bug fixes
+
 ## Documentation
 
 When adding new features or making user-facing changes, always update the README.md file to reflect those changes. This includes:

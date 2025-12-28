@@ -144,8 +144,8 @@ func onReady() {
 		}
 	}()
 
-	// Initialize updater (TODO: replace with actual repo owner/name)
-	appUpdater = updater.New(version, "neubibackup", "neubibackup_go")
+	// Initialize updater
+	appUpdater = updater.New(version, "ianneub", "neubibackup")
 
 	// Check for updates on startup if needed
 	go checkForUpdatesIfNeeded()

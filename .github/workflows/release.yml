@@ -209,11 +209,12 @@ jobs:
         run: |
           # Create ZIP containing the .app bundle (for go-selfupdate)
           # The ZIP must be created from the directory containing the .app
+          # go-selfupdate expects naming: {cmd}_{goos}_{goarch}.zip
           cd dmg_contents
-          zip -r ../NeubiBackup-${{ matrix.arch_name }}.zip NeubiBackup.app
+          zip -r ../neubibackup_darwin_${{ matrix.goarch }}.zip NeubiBackup.app
           cd ..
           echo "ZIP created successfully:"
-          ls -la NeubiBackup-${{ matrix.arch_name }}.zip
+          ls -la neubibackup_darwin_${{ matrix.goarch }}.zip
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -224,8 +225,8 @@ jobs:
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: neubibackup-darwin-${{ matrix.arch_name }}-zip
-          path: NeubiBackup-${{ matrix.arch_name }}.zip
+          name: neubibackup-darwin-${{ matrix.goarch }}-zip
+          path: neubibackup_darwin_${{ matrix.goarch }}.zip
 
   build-windows:
     name: Build Windows
@@ -363,11 +364,13 @@ jobs:
           cp artifacts/neubibackup-darwin-arm64-dmg/NeubiBackup-arm64.dmg release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg
           cp artifacts/neubibackup-darwin-amd64-dmg/NeubiBackup-amd64.dmg release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.dmg
           # macOS ZIP files (for auto-updates via go-selfupdate)
-          cp artifacts/neubibackup-darwin-arm64-zip/NeubiBackup-arm64.zip release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-arm64.zip
-          cp artifacts/neubibackup-darwin-amd64-zip/NeubiBackup-amd64.zip release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.zip
+          # go-selfupdate expects naming: {cmd}_{goos}_{goarch}.zip
+          cp artifacts/neubibackup-darwin-arm64-zip/neubibackup_darwin_arm64.zip release/
+          cp artifacts/neubibackup-darwin-amd64-zip/neubibackup_darwin_amd64.zip release/
           # Windows files
           cp artifacts/neubibackup-windows-amd64-installer/NeubiBackup-Setup.exe release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-setup.exe
-          cp artifacts/neubibackup-windows-amd64-portable/neubibackup.exe release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-portable.exe
+          # Windows portable EXE (for auto-updates via go-selfupdate)
+          cp artifacts/neubibackup-windows-amd64-portable/neubibackup.exe release/neubibackup_windows_amd64.exe
 
       - name: Generate checksums
         run: |
@@ -384,10 +387,10 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-arm64.zip
+            release/neubibackup_darwin_arm64.zip
             release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg
-            release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.zip
+            release/neubibackup_darwin_amd64.zip
             release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.dmg
             release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-setup.exe
-            release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-portable.exe
+            release/neubibackup_windows_amd64.exe
             release/SHA256SUMS.txt

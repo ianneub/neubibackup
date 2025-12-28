@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"time"
 
-	"neubibackup/assets"
 	"neubibackup/internal/app"
 	"neubibackup/internal/autostart"
 	"neubibackup/internal/backup"
@@ -46,12 +45,8 @@ var (
 	// Thread-safe backup state
 	backupState = app.NewBackupState()
 
-	// Menu items for dynamic updates
-	mStatus       *systray.MenuItem
-	mBackupNow    *systray.MenuItem
-	mStopBackup   *systray.MenuItem
-	mAutostart    *systray.MenuItem
-	mUpdateStatus *systray.MenuItem
+	// System tray menu
+	menu *tray.Menu
 
 	// Updater state
 	appUpdater   *updater.Updater
@@ -125,7 +120,22 @@ func onReady() {
 	systray.SetTooltip("NeubiBackup")
 
 	// Build menu
-	setupMenu()
+	menu = tray.NewMenu(tray.MenuConfig{
+		Version:       version,
+		ResticVersion: restic.Version,
+		AppState:      func() *state.State { return appState },
+		BackupState:   backupState,
+		UpdateState:   updateState,
+		IsConfigured:  func() bool { return cfg != nil && cfg.IsConfigured() },
+		Autostart:     autostartMgr,
+		OnBackupNow:   triggerBackupNow,
+		OnStopBackup:  stopBackup,
+		OnOpenConfig:  openConfig,
+		OnOpenLogs:    openLogs,
+		OnOpenAppLog:  openAppLog,
+		OnUpdateClick: handleUpdateClick,
+		OnQuit:        func() { systray.Quit() },
+	})
 
 	// Start config file watcher
 	go watchConfigFile()
@@ -202,116 +212,47 @@ func handleFirstRun() error {
 	return nil
 }
 
-func setupMenu() {
-	isConfigured := cfg != nil && cfg.IsConfigured()
+// Menu callback functions
 
-	// Status line
-	if !isConfigured {
-		mStatus = systray.AddMenuItem("⚠️ Configuration required...", "Please edit config.yaml")
+func openConfig() {
+	configPath, err := config.GetConfigPath()
+	if err != nil {
+		log.Printf("Error getting config path: %v", err)
+		return
+	}
+	if err := config.OpenInEditor(configPath); err != nil {
+		log.Printf("Error opening config: %v", err)
+	}
+}
+
+func openLogs() {
+	logsDir, err := config.GetLogsDir()
+	if err != nil {
+		log.Printf("Error getting logs dir: %v", err)
+		return
+	}
+	if err := config.OpenFolder(logsDir); err != nil {
+		log.Printf("Error opening logs folder: %v", err)
+	}
+}
+
+func openAppLog() {
+	appLogPath, err := logging.GetAppLogPath()
+	if err != nil {
+		log.Printf("Error getting app log path: %v", err)
+		return
+	}
+	if err := config.OpenInEditor(appLogPath); err != nil {
+		log.Printf("Error opening app log: %v", err)
+	}
+}
+
+func handleUpdateClick() {
+	if updateState.HasUpdate() {
+		go installUpdate()
 	} else {
-		mStatus = systray.AddMenuItem(tray.FormatStatus(appState, backupState.IsRunning()), "Backup status")
+		go manualUpdateCheck()
 	}
-	mStatus.Disable()
-
-	systray.AddSeparator()
-
-	// Backup Now
-	mBackupNow = systray.AddMenuItem("Backup Now", "Start a backup immediately")
-	if !isConfigured {
-		mBackupNow.Disable()
-	}
-
-	// Stop Backup (hidden by default)
-	mStopBackup = systray.AddMenuItem("Stop Backup", "Stop the running backup")
-	mStopBackup.Hide()
-
-	systray.AddSeparator()
-
-	// Open Config File
-	mOpenConfig := systray.AddMenuItem("Open Config File", "Edit configuration")
-
-	// Open Logs Folder
-	mOpenLogs := systray.AddMenuItem("Open Logs Folder", "View backup logs")
-
-	// Open App Log
-	mOpenAppLog := systray.AddMenuItem("Open App Log", "View application log")
-
-	systray.AddSeparator()
-
-	// Start at Login
-	autostartEnabled := autostartMgr != nil && autostartMgr.IsEnabled()
-	mAutostart = systray.AddMenuItemCheckbox("Start at Login", "Launch at login", autostartEnabled)
-
-	systray.AddSeparator()
-
-	// Update status
-	mUpdateStatus = systray.AddMenuItem("Check for Updates", "Check for new versions")
-
-	// Version
-	mVersion := systray.AddMenuItem("Version "+version+" (restic "+restic.Version+")", "")
-	mVersion.Disable()
-
-	// Quit
-	mQuit := systray.AddMenuItem("Quit", "Quit NeubiBackup")
-
-	// Handle menu clicks
-	go func() {
-		for {
-			select {
-			case <-mBackupNow.ClickedCh:
-				triggerBackupNow()
-
-			case <-mStopBackup.ClickedCh:
-				stopBackup()
-
-			case <-mAutostart.ClickedCh:
-				toggleAutostart()
-
-			case <-mOpenConfig.ClickedCh:
-				configPath, err := config.GetConfigPath()
-				if err != nil {
-					log.Printf("Error getting config path: %v", err)
-					continue
-				}
-				if err := config.OpenInEditor(configPath); err != nil {
-					log.Printf("Error opening config: %v", err)
-				}
-
-			case <-mOpenLogs.ClickedCh:
-				logsDir, err := config.GetLogsDir()
-				if err != nil {
-					log.Printf("Error getting logs dir: %v", err)
-					continue
-				}
-				if err := config.OpenFolder(logsDir); err != nil {
-					log.Printf("Error opening logs folder: %v", err)
-				}
-
-			case <-mOpenAppLog.ClickedCh:
-				appLogPath, err := logging.GetAppLogPath()
-				if err != nil {
-					log.Printf("Error getting app log path: %v", err)
-					continue
-				}
-				if err := config.OpenInEditor(appLogPath); err != nil {
-					log.Printf("Error opening app log: %v", err)
-				}
-
-			case <-mUpdateStatus.ClickedCh:
-				if updateState.HasUpdate() {
-					// User clicked to install update
-					go installUpdate()
-				} else {
-					// User clicked to check for updates
-					go manualUpdateCheck()
-				}
-
-			case <-mQuit.ClickedCh:
-				systray.Quit()
-				return
-			}
-		}
-	}()
 }
 
 func initScheduler() {
@@ -369,23 +310,14 @@ func runBackup() {
 	// Update UI - show Stop Backup, hide Backup Now
 	updateStatus()
 	updateIcon()
-	if mBackupNow != nil {
-		mBackupNow.Hide()
-	}
-	if mStopBackup != nil {
-		mStopBackup.Show()
+	if menu != nil {
+		menu.SetBackupRunning(true)
 	}
 
 	defer func() {
 		// Restore menu - show Backup Now, hide Stop Backup
-		if mStopBackup != nil {
-			mStopBackup.Hide()
-		}
-		if mBackupNow != nil {
-			mBackupNow.Show()
-			if cfg != nil && cfg.IsConfigured() {
-				mBackupNow.Enable()
-			}
+		if menu != nil {
+			menu.SetBackupRunning(false)
 		}
 	}()
 
@@ -432,65 +364,19 @@ func runBackup() {
 }
 
 func updateStatus() {
-	if mStatus == nil {
-		return
+	if menu != nil {
+		menu.UpdateStatus()
 	}
-
-	running := backupState.IsRunning()
-	progress := backupState.GetProgress()
-
-	var title string
-	if running && progress != nil {
-		title = tray.FormatProgress(progress)
-	} else {
-		title = tray.FormatStatus(appState, running)
-	}
-
-	mStatus.SetTitle(title)
 }
 
 func updateIcon() {
-	if backupState.IsRunning() {
-		systray.SetIcon(assets.IconRunning)
-		return
-	}
-
-	if cfg == nil || !cfg.IsConfigured() {
-		systray.SetIcon(assets.IconError)
-		return
-	}
-
-	if appState.ConsecutiveFailures > 0 {
-		systray.SetIcon(assets.IconError)
-		return
-	}
-
-	if !appState.LastBackupSuccess.IsZero() {
-		systray.SetIcon(assets.IconSuccess)
-		return
-	}
-
-	systray.SetIcon(assets.IconIdle)
-}
-
-func toggleAutostart() {
-	if autostartMgr == nil {
-		log.Println("Autostart not available")
-		return
-	}
-
-	if err := autostartMgr.Toggle(); err != nil {
-		log.Printf("Error toggling autostart: %v", err)
-		return
-	}
-
-	if autostartMgr.IsEnabled() {
-		mAutostart.Check()
-		log.Println("Start at Login: enabled")
-	} else {
-		mAutostart.Uncheck()
-		log.Println("Start at Login: disabled")
-	}
+	iconState := tray.DetermineIconState(
+		backupState.IsRunning(),
+		cfg != nil && cfg.IsConfigured(),
+		appState.ConsecutiveFailures,
+		!appState.LastBackupSuccess.IsZero(),
+	)
+	systray.SetIcon(tray.GetIconBytes(iconState))
 }
 
 func watchConfigFile() {
@@ -562,15 +448,8 @@ func reloadConfig() {
 
 	// Update UI
 	updateIcon()
-	updateStatus()
-
-	if cfg.IsConfigured() {
-		if mBackupNow != nil {
-			mBackupNow.Enable()
-		}
-		if mStatus != nil {
-			mStatus.SetTitle(tray.FormatStatus(appState, backupState.IsRunning()))
-		}
+	if menu != nil {
+		menu.RefreshOnConfigChange()
 	}
 
 	log.Println("Config reloaded successfully")
@@ -643,15 +522,15 @@ func checkForUpdatesIfNeeded() {
 }
 
 func manualUpdateCheck() {
-	mUpdateStatus.SetTitle("Checking for updates...")
-	mUpdateStatus.Disable()
+	if menu != nil {
+		menu.SetUpdateStatus("Checking for updates...", false)
+	}
 
 	checkForUpdates()
 
 	// Re-enable the menu item if no update was found
-	if !updateState.HasUpdate() {
-		mUpdateStatus.SetTitle("Check for Updates")
-		mUpdateStatus.Enable()
+	if !updateState.HasUpdate() && menu != nil {
+		menu.SetUpdateStatus("Check for Updates", true)
 	}
 }
 
@@ -672,8 +551,9 @@ func checkForUpdates() {
 
 	if available {
 		updateState.SetAvailableVersion(newVersion)
-		mUpdateStatus.SetTitle(fmt.Sprintf("Update Available (%s)", newVersion))
-		mUpdateStatus.Enable()
+		if menu != nil {
+			menu.SetUpdateStatus(fmt.Sprintf("Update Available (%s)", newVersion), true)
+		}
 		log.Printf("Update available: %s", newVersion)
 
 		// Trigger automatic update in background
@@ -725,13 +605,15 @@ func attemptAutoUpdate(version string) {
 
 	// Apply the update
 	log.Printf("Auto-update: applying update to %s...", version)
-	mUpdateStatus.SetTitle("Updating...")
-	mUpdateStatus.Disable()
+	if menu != nil {
+		menu.SetUpdateStatus("Updating...", false)
+	}
 
 	if err := appUpdater.DownloadAndApply(appCtx); err != nil {
 		log.Printf("Auto-update failed: %v", err)
-		mUpdateStatus.SetTitle(fmt.Sprintf("Update failed (%s)", version))
-		mUpdateStatus.Enable()
+		if menu != nil {
+			menu.SetUpdateStatus(fmt.Sprintf("Update failed (%s)", version), true)
+		}
 
 		// Record error in state
 		appState.LastUpdateError = err.Error()
@@ -756,8 +638,9 @@ func attemptAutoUpdate(version string) {
 	// Restart the application
 	if err := updater.Restart(); err != nil {
 		log.Printf("Auto-update: restart failed: %v", err)
-		mUpdateStatus.SetTitle("Updated - please restart manually")
-		mUpdateStatus.Enable()
+		if menu != nil {
+			menu.SetUpdateStatus("Updated - please restart manually", true)
+		}
 	}
 }
 
@@ -765,27 +648,33 @@ func installUpdate() {
 	// Prevent update during backup
 	if backupState.IsRunning() {
 		log.Println("Cannot update while backup is running")
-		mUpdateStatus.SetTitle("Update blocked - backup running")
+		if menu != nil {
+			menu.SetUpdateStatus("Update blocked - backup running", true)
+		}
 		return
 	}
 
 	availableVersion := updateState.GetAvailableVersion()
 
-	mUpdateStatus.SetTitle("Downloading update...")
-	mUpdateStatus.Disable()
+	if menu != nil {
+		menu.SetUpdateStatus("Downloading update...", false)
+	}
 
 	log.Printf("Installing update to %s...", availableVersion)
 
 	if err := appUpdater.DownloadAndApply(appCtx); err != nil {
 		log.Printf("Update failed: %v", err)
-		mUpdateStatus.SetTitle("Update failed - click to retry")
-		mUpdateStatus.Enable()
+		if menu != nil {
+			menu.SetUpdateStatus("Update failed - click to retry", true)
+		}
 		return
 	}
 
 	// Update succeeded
 	log.Println("Update installed successfully, restarting...")
-	mUpdateStatus.SetTitle("Update installed - restarting...")
+	if menu != nil {
+		menu.SetUpdateStatus("Update installed - restarting...", false)
+	}
 
 	// Record successful update
 	appState.LastUpdateVersion = availableVersion
@@ -798,8 +687,9 @@ func installUpdate() {
 	// Restart the application
 	if err := updater.Restart(); err != nil {
 		log.Printf("Restart failed: %v", err)
-		mUpdateStatus.SetTitle("Updated - please restart manually")
-		mUpdateStatus.Enable()
+		if menu != nil {
+			menu.SetUpdateStatus("Updated - please restart manually", true)
+		}
 	}
 }
 

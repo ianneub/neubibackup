@@ -145,52 +145,70 @@ func (o *Orchestrator) Run(ctx context.Context) Result
 
 ---
 
-### Phase 3: Expand Tray Package
+### Phase 3: Expand Tray Package - COMPLETED
 
-**Files to create:**
-- `internal/tray/icon.go` - Icon state determination
-- `internal/tray/menu.go` - Menu setup and event handling
+**Status:** Completed
 
-**Key interfaces:**
+**Files created:**
+- `internal/tray/icon.go` (54 lines) - Icon state determination with `DetermineIconState()` and `GetIconBytes()`
+- `internal/tray/icon_test.go` (126 lines) - Table-driven tests for icon state logic
+- `internal/tray/menu.go` (258 lines) - Menu struct with configuration and event handling
+- `internal/tray/menu_test.go` (242 lines) - Mock-based tests for menu configuration
+
+**Implemented interfaces:**
 ```go
-type MenuCallbacks interface {
-    OnBackupNow()
-    OnStopBackup()
-    OnToggleAutostart()
-    OnOpenConfig()
-    OnOpenLogs()
-    OnOpenAppLog()
-    OnUpdateClick()
-    OnQuit()
+type BackupStateProvider interface {
+    IsRunning() bool
+    GetProgress() *restic.BackupProgress
 }
 
-type MenuState interface {
-    IsConfigured() bool
-    IsBackupRunning() bool
-    IsAutostartEnabled() bool
-    BackupProgress() *restic.BackupProgress
-    State() *state.State
-    AvailableVersion() string
-    Version() string
+type UpdateStateProvider interface {
+    HasUpdate() bool
+    GetAvailableVersion() string
+}
+
+type AutostartProvider interface {
+    IsEnabled() bool
+    Toggle() error
 }
 ```
 
-**Key type:**
+**Key types:**
 ```go
-type Menu struct {
-    status, backupNow, stopBackup, autostart, updateStatus *systray.MenuItem
-    callbacks MenuCallbacks
-    state     MenuState
+type IconState int // IconStateIdle, IconStateSuccess, IconStateError, IconStateRunning
+
+type MenuConfig struct {
+    Version, ResticVersion string
+    AppState               func() *state.State
+    BackupState            BackupStateProvider
+    UpdateState            UpdateStateProvider
+    IsConfigured           func() bool
+    Autostart              AutostartProvider
+    OnBackupNow, OnStopBackup, OnOpenConfig, OnOpenLogs, OnOpenAppLog, OnUpdateClick, OnQuit func()
 }
 
-func NewMenu(callbacks MenuCallbacks, state MenuState, version string) *Menu
-func (m *Menu) StartEventLoop()
+type Menu struct { /* internal menu item refs */ }
+
+func NewMenu(cfg MenuConfig) *Menu
 func (m *Menu) UpdateStatus()
+func (m *Menu) SetBackupRunning(running bool)
+func (m *Menu) SetUpdateStatus(text string, enabled bool)
+func (m *Menu) RefreshOnConfigChange()
 ```
 
-**Migration:** Extract `setupMenu()` (111 lines) to `tray.NewMenu()`.
+**Migration completed:**
+- Replaced `setupMenu()` with `tray.NewMenu(MenuConfig{...})`
+- Replaced `updateIcon()` with `tray.DetermineIconState()` and `tray.GetIconBytes()`
+- Replaced `updateStatus()` with `menu.UpdateStatus()`
+- Replaced `toggleAutostart()` - now handled inside Menu
+- Replaced all direct `mUpdateStatus` references with `menu.SetUpdateStatus()`
+- Added helper callback functions: `openConfig()`, `openLogs()`, `openAppLog()`, `handleUpdateClick()`
 
-**Tests:** Icon state determination, status formatting (existing tests cover some).
+**Results:**
+- main.go reduced from 836 lines to 726 lines (-110 lines)
+- New tray package files: 680 lines of code + tests
+
+**Tests:** All tests pass with `-race` flag.
 
 ---
 
@@ -341,10 +359,10 @@ func onExit() {
 | `internal/backup/notifier.go` | Notification composition | ✅ Created |
 | `internal/backup/notifier_test.go` | Notifier tests | ✅ Created |
 | `internal/backup/tailscale_adapter.go` | TailscaleProvider adapter | ✅ Created |
-| `internal/tray/menu.go` | Menu setup and events | Pending (Phase 3) |
-| `internal/tray/menu_test.go` | Menu tests | Pending (Phase 3) |
-| `internal/tray/icon.go` | Icon state logic | Pending (Phase 3) |
-| `internal/tray/icon_test.go` | Icon tests | Pending (Phase 3) |
+| `internal/tray/menu.go` | Menu setup and events | ✅ Created |
+| `internal/tray/menu_test.go` | Menu tests | ✅ Created |
+| `internal/tray/icon.go` | Icon state logic | ✅ Created |
+| `internal/tray/icon_test.go` | Icon tests | ✅ Created |
 | `internal/updater/orchestrator.go` | Auto-update orchestration | Pending (Phase 5) |
 | `internal/updater/orchestrator_test.go` | Update orchestrator tests | Pending (Phase 5) |
 

@@ -77,6 +77,7 @@ func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer,
 	fmt.Fprintf(logWriter, "Repository: %s\n\n", sanitizeURLForLogging(cfg.Repository.Path))
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
+	configureCmd(cmd)
 
 	// Set environment
 	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
@@ -135,9 +136,11 @@ func buildBackupArgs(cfg *config.Config) []string {
 	args = append(args, cfg.ResticArgs.Backup...)
 
 	// Add hardcoded flags if not already present in user config
-	hardcodedFlags := []string{"--one-file-system", "--exclude-caches"}
+	hardcodedFlags := []string{"--exclude-caches"}
 	if runtime.GOOS == "windows" {
 		hardcodedFlags = append(hardcodedFlags, "--use-fs-snapshot")
+	} else {
+		hardcodedFlags = append(hardcodedFlags, "--one-file-system")
 	}
 
 	for _, flag := range hardcodedFlags {
@@ -297,6 +300,7 @@ func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, pr
 	args = append(args, extraArgs...)
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
+	configureCmd(cmd)
 	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 	cmd.Stdout = logWriter
 	cmd.Stderr = logWriter
@@ -323,6 +327,7 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 	}
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
+	configureCmd(cmd)
 	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 
 	// Run silently - we only care about exit code
@@ -346,6 +351,7 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 	}
 
 	initCmd := exec.CommandContext(ctx, binaryPath, initArgs...)
+	configureCmd(initCmd)
 	initCmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 	initCmd.Stdout = logWriter
 	initCmd.Stderr = logWriter

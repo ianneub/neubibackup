@@ -83,8 +83,12 @@ repository:
 # What to back up
 backup:
   paths:
+    # macOS:
     - "/Users/yourname/Documents"
     - "/Users/yourname/Pictures"
+    # Windows (use forward slashes OR single quotes with backslashes):
+    # - "C:/Users/yourname/Documents"
+    # - 'C:\Users\yourname\Pictures'
   excludes:
     - "*.tmp"
     - ".DS_Store"

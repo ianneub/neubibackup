@@ -29,7 +29,6 @@ func TestBuildBackupArgs(t *testing.T) {
 				"backup",
 				"--json",
 				"-r", "/backup/repo",
-				"--one-file-system",
 				"--exclude-caches",
 				"/home/user",
 			},
@@ -252,11 +251,19 @@ func TestBuildBackupArgs_HardcodedFlags(t *testing.T) {
 
 	args := buildBackupArgs(cfg)
 
-	// These should always be present
-	hardcodedFlags := []string{"--one-file-system", "--exclude-caches"}
-	for _, flag := range hardcodedFlags {
-		if !containsArg(args, flag) {
-			t.Errorf("buildBackupArgs() should include hardcoded flag %q", flag)
+	// --exclude-caches should always be present on all platforms
+	if !containsArg(args, "--exclude-caches") {
+		t.Error("buildBackupArgs() should include --exclude-caches")
+	}
+
+	// --one-file-system should only be present on non-Windows
+	if runtime.GOOS == "windows" {
+		if containsArg(args, "--one-file-system") {
+			t.Error("buildBackupArgs() on Windows should not include --one-file-system")
+		}
+	} else {
+		if !containsArg(args, "--one-file-system") {
+			t.Error("buildBackupArgs() on non-Windows should include --one-file-system")
 		}
 	}
 }
@@ -277,16 +284,28 @@ func TestBuildBackupArgs_NoDuplicateFlags(t *testing.T) {
 
 	args := buildBackupArgs(cfg)
 
-	// Count occurrences of --one-file-system
-	count := 0
+	// Count occurrences of --exclude-caches (always hardcoded, should not be duplicated)
+	excludeCachesCount := 0
 	for _, arg := range args {
-		if arg == "--one-file-system" {
-			count++
+		if arg == "--exclude-caches" {
+			excludeCachesCount++
 		}
 	}
+	if excludeCachesCount > 1 {
+		t.Errorf("buildBackupArgs() has duplicate --exclude-caches flags (%d occurrences)", excludeCachesCount)
+	}
 
-	if count > 1 {
-		t.Errorf("buildBackupArgs() has duplicate --one-file-system flags (%d occurrences)", count)
+	// Count occurrences of --one-file-system (only hardcoded on non-Windows)
+	oneFileSystemCount := 0
+	for _, arg := range args {
+		if arg == "--one-file-system" {
+			oneFileSystemCount++
+		}
+	}
+	// On non-Windows, user's --one-file-system should not be duplicated by hardcoded flag
+	// On Windows, user's --one-file-system is kept as-is (no hardcoded addition)
+	if oneFileSystemCount > 1 {
+		t.Errorf("buildBackupArgs() has duplicate --one-file-system flags (%d occurrences)", oneFileSystemCount)
 	}
 }
 

@@ -38,7 +38,13 @@ repository:
 # What to backup
 backup:
   paths:
-    - ""  # Add paths to backup, e.g., "/Users/username/Documents"
+    - ""  # Add paths to backup
+    # macOS examples:
+    #   - "/Users/username/Documents"
+    #   - "/Users/username/Pictures"
+    # Windows examples (use forward slashes OR single quotes with backslashes):
+    #   - "C:/Users/username/Documents"
+    #   - 'C:\Users\username\Pictures'
   excludes:
     - "*.tmp"
     - ".DS_Store"

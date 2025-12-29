@@ -118,35 +118,39 @@ func TestConfigIsConfigured(t *testing.T) {
 // TestStateRecordSuccess tests the state recording for successful backups
 func TestStateRecordSuccess(t *testing.T) {
 	s := &state.State{
-		ConsecutiveFailures: 5,
-		LastBackupError:     "previous error",
+		Backup: state.BackupState{
+			ConsecutiveFailures: 5,
+			LastError:           "previous error",
+		},
 	}
 
 	before := time.Now()
 	s.RecordSuccess()
 	after := time.Now()
 
-	if s.ConsecutiveFailures != 0 {
-		t.Errorf("ConsecutiveFailures = %d, want 0", s.ConsecutiveFailures)
+	if s.Backup.ConsecutiveFailures != 0 {
+		t.Errorf("ConsecutiveFailures = %d, want 0", s.Backup.ConsecutiveFailures)
 	}
 
-	if s.LastBackupError != "" {
-		t.Errorf("LastBackupError = %q, want empty", s.LastBackupError)
+	if s.Backup.LastError != "" {
+		t.Errorf("LastError = %q, want empty", s.Backup.LastError)
 	}
 
-	if s.LastBackupSuccess.Before(before) || s.LastBackupSuccess.After(after) {
-		t.Errorf("LastBackupSuccess = %v, should be between %v and %v", s.LastBackupSuccess, before, after)
+	if s.Backup.LastSuccess.Before(before) || s.Backup.LastSuccess.After(after) {
+		t.Errorf("LastSuccess = %v, should be between %v and %v", s.Backup.LastSuccess, before, after)
 	}
 
-	if s.LastBackupAttempt.Before(before) || s.LastBackupAttempt.After(after) {
-		t.Errorf("LastBackupAttempt = %v, should be between %v and %v", s.LastBackupAttempt, before, after)
+	if s.Backup.LastAttempt.Before(before) || s.Backup.LastAttempt.After(after) {
+		t.Errorf("LastAttempt = %v, should be between %v and %v", s.Backup.LastAttempt, before, after)
 	}
 }
 
 // TestStateRecordFailure tests the state recording for failed backups
 func TestStateRecordFailure(t *testing.T) {
 	s := &state.State{
-		ConsecutiveFailures: 2,
+		Backup: state.BackupState{
+			ConsecutiveFailures: 2,
+		},
 	}
 
 	testErr := errors.New("backup failed: network error")
@@ -154,16 +158,16 @@ func TestStateRecordFailure(t *testing.T) {
 	s.RecordFailure(testErr)
 	after := time.Now()
 
-	if s.ConsecutiveFailures != 3 {
-		t.Errorf("ConsecutiveFailures = %d, want 3", s.ConsecutiveFailures)
+	if s.Backup.ConsecutiveFailures != 3 {
+		t.Errorf("ConsecutiveFailures = %d, want 3", s.Backup.ConsecutiveFailures)
 	}
 
-	if s.LastBackupError != testErr.Error() {
-		t.Errorf("LastBackupError = %q, want %q", s.LastBackupError, testErr.Error())
+	if s.Backup.LastError != testErr.Error() {
+		t.Errorf("LastError = %q, want %q", s.Backup.LastError, testErr.Error())
 	}
 
-	if s.LastBackupAttempt.Before(before) || s.LastBackupAttempt.After(after) {
-		t.Errorf("LastBackupAttempt = %v, should be between %v and %v", s.LastBackupAttempt, before, after)
+	if s.Backup.LastAttempt.Before(before) || s.Backup.LastAttempt.After(after) {
+		t.Errorf("LastAttempt = %v, should be between %v and %v", s.Backup.LastAttempt, before, after)
 	}
 }
 
@@ -196,7 +200,9 @@ func TestStateHasBackedUpToday(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &state.State{
-				LastBackupSuccess: tt.lastSuccess,
+				Backup: state.BackupState{
+					LastSuccess: tt.lastSuccess,
+				},
 			}
 			result := s.HasBackedUpToday(loc)
 			if result != tt.hasBackedUpToday {
@@ -377,41 +383,41 @@ func TestStateUpdateFields(t *testing.T) {
 	s := &state.State{}
 
 	// Test initial state
-	if s.LastUpdateVersion != "" {
-		t.Errorf("LastUpdateVersion should be empty initially, got %q", s.LastUpdateVersion)
+	if s.Update.LastVersion != "" {
+		t.Errorf("LastVersion should be empty initially, got %q", s.Update.LastVersion)
 	}
-	if !s.LastUpdateTime.IsZero() {
-		t.Errorf("LastUpdateTime should be zero initially, got %v", s.LastUpdateTime)
+	if !s.Update.LastTime.IsZero() {
+		t.Errorf("LastTime should be zero initially, got %v", s.Update.LastTime)
 	}
-	if s.LastUpdateError != "" {
-		t.Errorf("LastUpdateError should be empty initially, got %q", s.LastUpdateError)
+	if s.Update.LastError != "" {
+		t.Errorf("LastError should be empty initially, got %q", s.Update.LastError)
 	}
-	if !s.LastUpdateErrorTime.IsZero() {
-		t.Errorf("LastUpdateErrorTime should be zero initially, got %v", s.LastUpdateErrorTime)
+	if !s.Update.LastErrorTime.IsZero() {
+		t.Errorf("LastErrorTime should be zero initially, got %v", s.Update.LastErrorTime)
 	}
 
 	// Set update success fields
 	now := time.Now()
-	s.LastUpdateVersion = "v1.2.3"
-	s.LastUpdateTime = now
-	s.LastUpdateError = ""
+	s.Update.LastVersion = "v1.2.3"
+	s.Update.LastTime = now
+	s.Update.LastError = ""
 
-	if s.LastUpdateVersion != "v1.2.3" {
-		t.Errorf("LastUpdateVersion = %q, want %q", s.LastUpdateVersion, "v1.2.3")
+	if s.Update.LastVersion != "v1.2.3" {
+		t.Errorf("LastVersion = %q, want %q", s.Update.LastVersion, "v1.2.3")
 	}
-	if s.LastUpdateTime != now {
-		t.Errorf("LastUpdateTime = %v, want %v", s.LastUpdateTime, now)
+	if s.Update.LastTime != now {
+		t.Errorf("LastTime = %v, want %v", s.Update.LastTime, now)
 	}
 
 	// Set update error fields
 	errTime := time.Now()
-	s.LastUpdateError = "network error"
-	s.LastUpdateErrorTime = errTime
+	s.Update.LastError = "network error"
+	s.Update.LastErrorTime = errTime
 
-	if s.LastUpdateError != "network error" {
-		t.Errorf("LastUpdateError = %q, want %q", s.LastUpdateError, "network error")
+	if s.Update.LastError != "network error" {
+		t.Errorf("LastError = %q, want %q", s.Update.LastError, "network error")
 	}
-	if s.LastUpdateErrorTime != errTime {
-		t.Errorf("LastUpdateErrorTime = %v, want %v", s.LastUpdateErrorTime, errTime)
+	if s.Update.LastErrorTime != errTime {
+		t.Errorf("LastErrorTime = %v, want %v", s.Update.LastErrorTime, errTime)
 	}
 }

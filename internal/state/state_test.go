@@ -4,45 +4,50 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestRecordSuccess(t *testing.T) {
 	s := &State{
-		ConsecutiveFailures: 5,
-		LastBackupError:     "previous error",
+		Backup: BackupState{
+			ConsecutiveFailures: 5,
+			LastError:           "previous error",
+		},
 	}
 
 	before := time.Now()
 	s.RecordSuccess()
 	after := time.Now()
 
-	if s.ConsecutiveFailures != 0 {
-		t.Errorf("ConsecutiveFailures = %d, want 0", s.ConsecutiveFailures)
+	if s.Backup.ConsecutiveFailures != 0 {
+		t.Errorf("ConsecutiveFailures = %d, want 0", s.Backup.ConsecutiveFailures)
 	}
 
-	if s.LastBackupError != "" {
-		t.Errorf("LastBackupError = %q, want empty", s.LastBackupError)
+	if s.Backup.LastError != "" {
+		t.Errorf("LastError = %q, want empty", s.Backup.LastError)
 	}
 
-	if s.LastBackupSuccess.Before(before) || s.LastBackupSuccess.After(after) {
-		t.Errorf("LastBackupSuccess = %v, should be between %v and %v", s.LastBackupSuccess, before, after)
+	if s.Backup.LastSuccess.Before(before) || s.Backup.LastSuccess.After(after) {
+		t.Errorf("LastSuccess = %v, should be between %v and %v", s.Backup.LastSuccess, before, after)
 	}
 
-	if s.LastBackupAttempt.Before(before) || s.LastBackupAttempt.After(after) {
-		t.Errorf("LastBackupAttempt = %v, should be between %v and %v", s.LastBackupAttempt, before, after)
+	if s.Backup.LastAttempt.Before(before) || s.Backup.LastAttempt.After(after) {
+		t.Errorf("LastAttempt = %v, should be between %v and %v", s.Backup.LastAttempt, before, after)
 	}
 
-	// LastBackupSuccess and LastBackupAttempt should be the same after success
-	if s.LastBackupSuccess != s.LastBackupAttempt {
-		t.Errorf("LastBackupSuccess (%v) != LastBackupAttempt (%v)", s.LastBackupSuccess, s.LastBackupAttempt)
+	// LastSuccess and LastAttempt should be the same after success
+	if s.Backup.LastSuccess != s.Backup.LastAttempt {
+		t.Errorf("LastSuccess (%v) != LastAttempt (%v)", s.Backup.LastSuccess, s.Backup.LastAttempt)
 	}
 }
 
 func TestRecordFailure(t *testing.T) {
 	s := &State{
-		ConsecutiveFailures: 2,
+		Backup: BackupState{
+			ConsecutiveFailures: 2,
+		},
 	}
 
 	testErr := errors.New("backup failed: network error")
@@ -50,21 +55,21 @@ func TestRecordFailure(t *testing.T) {
 	s.RecordFailure(testErr)
 	after := time.Now()
 
-	if s.ConsecutiveFailures != 3 {
-		t.Errorf("ConsecutiveFailures = %d, want 3", s.ConsecutiveFailures)
+	if s.Backup.ConsecutiveFailures != 3 {
+		t.Errorf("ConsecutiveFailures = %d, want 3", s.Backup.ConsecutiveFailures)
 	}
 
-	if s.LastBackupError != testErr.Error() {
-		t.Errorf("LastBackupError = %q, want %q", s.LastBackupError, testErr.Error())
+	if s.Backup.LastError != testErr.Error() {
+		t.Errorf("LastError = %q, want %q", s.Backup.LastError, testErr.Error())
 	}
 
-	if s.LastBackupAttempt.Before(before) || s.LastBackupAttempt.After(after) {
-		t.Errorf("LastBackupAttempt = %v, should be between %v and %v", s.LastBackupAttempt, before, after)
+	if s.Backup.LastAttempt.Before(before) || s.Backup.LastAttempt.After(after) {
+		t.Errorf("LastAttempt = %v, should be between %v and %v", s.Backup.LastAttempt, before, after)
 	}
 
-	// LastBackupSuccess should remain zero (not set on failure)
-	if !s.LastBackupSuccess.IsZero() {
-		t.Errorf("LastBackupSuccess = %v, want zero", s.LastBackupSuccess)
+	// LastSuccess should remain zero (not set on failure)
+	if !s.Backup.LastSuccess.IsZero() {
+		t.Errorf("LastSuccess = %v, want zero", s.Backup.LastSuccess)
 	}
 }
 
@@ -74,8 +79,8 @@ func TestRecordFailure_Increment(t *testing.T) {
 	// Record multiple failures
 	for i := 1; i <= 5; i++ {
 		s.RecordFailure(errors.New("error"))
-		if s.ConsecutiveFailures != i {
-			t.Errorf("After %d failures, ConsecutiveFailures = %d, want %d", i, s.ConsecutiveFailures, i)
+		if s.Backup.ConsecutiveFailures != i {
+			t.Errorf("After %d failures, ConsecutiveFailures = %d, want %d", i, s.Backup.ConsecutiveFailures, i)
 		}
 	}
 }
@@ -113,7 +118,9 @@ func TestHasBackedUpToday(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &State{
-				LastBackupSuccess: tt.lastSuccess,
+				Backup: BackupState{
+					LastSuccess: tt.lastSuccess,
+				},
 			}
 			result := s.HasBackedUpToday(loc)
 			if result != tt.hasBackedUpToday {
@@ -135,7 +142,9 @@ func TestHasBackedUpToday_DifferentTimezone(t *testing.T) {
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 
 	s := &State{
-		LastBackupSuccess: todayStart.Add(1 * time.Hour), // 1am today in UTC
+		Backup: BackupState{
+			LastSuccess: todayStart.Add(1 * time.Hour), // 1am today in UTC
+		},
 	}
 
 	if !s.HasBackedUpToday(loc) {
@@ -155,7 +164,9 @@ func TestLastSuccessAge(t *testing.T) {
 	t.Run("returns time since last success", func(t *testing.T) {
 		backupTime := time.Now().Add(-2 * time.Hour)
 		s := &State{
-			LastBackupSuccess: backupTime,
+			Backup: BackupState{
+				LastSuccess: backupTime,
+			},
 		}
 
 		age := s.LastSuccessAge()
@@ -181,17 +192,18 @@ func TestLoadFromFile(t *testing.T) {
 		if s == nil {
 			t.Fatal("LoadFromFile() returned nil state")
 		}
-		if s.ConsecutiveFailures != 0 {
-			t.Errorf("Expected empty state, got ConsecutiveFailures = %d", s.ConsecutiveFailures)
+		if s.Backup.ConsecutiveFailures != 0 {
+			t.Errorf("Expected empty state, got ConsecutiveFailures = %d", s.Backup.ConsecutiveFailures)
 		}
 	})
 
-	t.Run("loads existing state", func(t *testing.T) {
-		statePath := filepath.Join(tmpDir, "state.yaml")
-		stateContent := `last_backup_attempt: 2024-01-15T10:00:00Z
-last_backup_success: 2024-01-15T10:00:00Z
-last_backup_error: ""
-consecutive_failures: 0
+	t.Run("loads existing nested state", func(t *testing.T) {
+		statePath := filepath.Join(tmpDir, "state_nested.yaml")
+		stateContent := `backup:
+  last_attempt: 2024-01-15T10:00:00Z
+  last_success: 2024-01-15T10:00:00Z
+  last_error: ""
+  consecutive_failures: 0
 `
 		if err := os.WriteFile(statePath, []byte(stateContent), 0600); err != nil {
 			t.Fatalf("Failed to write test state: %v", err)
@@ -202,11 +214,11 @@ consecutive_failures: 0
 			t.Fatalf("LoadFromFile() error = %v", err)
 		}
 
-		if s.ConsecutiveFailures != 0 {
-			t.Errorf("ConsecutiveFailures = %d, want 0", s.ConsecutiveFailures)
+		if s.Backup.ConsecutiveFailures != 0 {
+			t.Errorf("ConsecutiveFailures = %d, want 0", s.Backup.ConsecutiveFailures)
 		}
-		if s.LastBackupSuccess.IsZero() {
-			t.Error("LastBackupSuccess should not be zero")
+		if s.Backup.LastSuccess.IsZero() {
+			t.Error("LastSuccess should not be zero")
 		}
 	})
 
@@ -228,10 +240,12 @@ func TestSaveToFile(t *testing.T) {
 	statePath := filepath.Join(tmpDir, "state.yaml")
 
 	s := &State{
-		LastBackupAttempt:   time.Now(),
-		LastBackupSuccess:   time.Now(),
-		LastBackupError:     "",
-		ConsecutiveFailures: 0,
+		Backup: BackupState{
+			LastAttempt:         time.Now(),
+			LastSuccess:         time.Now(),
+			LastError:           "",
+			ConsecutiveFailures: 0,
+		},
 	}
 
 	if err := s.SaveToFile(statePath); err != nil {
@@ -253,8 +267,8 @@ func TestSaveToFile(t *testing.T) {
 		t.Fatalf("LoadFromFile() error = %v", err)
 	}
 
-	if loaded.ConsecutiveFailures != s.ConsecutiveFailures {
-		t.Errorf("Loaded ConsecutiveFailures = %d, want %d", loaded.ConsecutiveFailures, s.ConsecutiveFailures)
+	if loaded.Backup.ConsecutiveFailures != s.Backup.ConsecutiveFailures {
+		t.Errorf("Loaded ConsecutiveFailures = %d, want %d", loaded.Backup.ConsecutiveFailures, s.Backup.ConsecutiveFailures)
 	}
 }
 
@@ -263,8 +277,10 @@ func TestSaveToFile_WithFailures(t *testing.T) {
 	statePath := filepath.Join(tmpDir, "state.yaml")
 
 	s := &State{
-		ConsecutiveFailures: 3,
-		LastBackupError:     "network error",
+		Backup: BackupState{
+			ConsecutiveFailures: 3,
+			LastError:           "network error",
+		},
 	}
 	s.RecordFailure(errors.New("connection refused"))
 
@@ -278,10 +294,141 @@ func TestSaveToFile_WithFailures(t *testing.T) {
 		t.Fatalf("LoadFromFile() error = %v", err)
 	}
 
-	if loaded.ConsecutiveFailures != 4 {
-		t.Errorf("Loaded ConsecutiveFailures = %d, want 4", loaded.ConsecutiveFailures)
+	if loaded.Backup.ConsecutiveFailures != 4 {
+		t.Errorf("Loaded ConsecutiveFailures = %d, want 4", loaded.Backup.ConsecutiveFailures)
 	}
-	if loaded.LastBackupError != "connection refused" {
-		t.Errorf("Loaded LastBackupError = %q, want %q", loaded.LastBackupError, "connection refused")
+	if loaded.Backup.LastError != "connection refused" {
+		t.Errorf("Loaded LastError = %q, want %q", loaded.Backup.LastError, "connection refused")
 	}
+}
+
+func TestMigration_LegacyToNested(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("migrates legacy backup fields", func(t *testing.T) {
+		statePath := filepath.Join(tmpDir, "legacy_backup.yaml")
+		// Old format with flat fields
+		stateContent := `last_backup_attempt: 2024-01-15T10:00:00Z
+last_backup_success: 2024-01-15T09:00:00Z
+last_backup_error: "network error"
+consecutive_failures: 3
+`
+		if err := os.WriteFile(statePath, []byte(stateContent), 0600); err != nil {
+			t.Fatalf("Failed to write test state: %v", err)
+		}
+
+		s, err := LoadFromFile(statePath)
+		if err != nil {
+			t.Fatalf("LoadFromFile() error = %v", err)
+		}
+
+		// Verify migration to nested fields
+		if s.Backup.LastAttempt.IsZero() {
+			t.Error("Backup.LastAttempt should be migrated")
+		}
+		if s.Backup.LastSuccess.IsZero() {
+			t.Error("Backup.LastSuccess should be migrated")
+		}
+		if s.Backup.LastError != "network error" {
+			t.Errorf("Backup.LastError = %q, want %q", s.Backup.LastError, "network error")
+		}
+		if s.Backup.ConsecutiveFailures != 3 {
+			t.Errorf("Backup.ConsecutiveFailures = %d, want 3", s.Backup.ConsecutiveFailures)
+		}
+
+		// Verify legacy fields are cleared
+		if !s.LegacyLastBackupAttempt.IsZero() {
+			t.Error("LegacyLastBackupAttempt should be cleared")
+		}
+		if !s.LegacyLastBackupSuccess.IsZero() {
+			t.Error("LegacyLastBackupSuccess should be cleared")
+		}
+		if s.LegacyLastBackupError != "" {
+			t.Error("LegacyLastBackupError should be cleared")
+		}
+		if s.LegacyConsecutiveFailures != 0 {
+			t.Error("LegacyConsecutiveFailures should be cleared")
+		}
+	})
+
+	t.Run("migrates legacy update fields", func(t *testing.T) {
+		statePath := filepath.Join(tmpDir, "legacy_update.yaml")
+		stateContent := `last_update_check: 2024-01-15T10:00:00Z
+last_update_version: "1.2.3"
+last_update_time: 2024-01-15T10:01:00Z
+last_update_error: "update failed"
+last_update_error_time: 2024-01-15T10:00:30Z
+`
+		if err := os.WriteFile(statePath, []byte(stateContent), 0600); err != nil {
+			t.Fatalf("Failed to write test state: %v", err)
+		}
+
+		s, err := LoadFromFile(statePath)
+		if err != nil {
+			t.Fatalf("LoadFromFile() error = %v", err)
+		}
+
+		// Verify migration to nested fields
+		if s.Update.LastCheck.IsZero() {
+			t.Error("Update.LastCheck should be migrated")
+		}
+		if s.Update.LastVersion != "1.2.3" {
+			t.Errorf("Update.LastVersion = %q, want %q", s.Update.LastVersion, "1.2.3")
+		}
+		if s.Update.LastTime.IsZero() {
+			t.Error("Update.LastTime should be migrated")
+		}
+		if s.Update.LastError != "update failed" {
+			t.Errorf("Update.LastError = %q, want %q", s.Update.LastError, "update failed")
+		}
+		if s.Update.LastErrorTime.IsZero() {
+			t.Error("Update.LastErrorTime should be migrated")
+		}
+
+		// Verify legacy fields are cleared
+		if !s.LegacyLastUpdateCheck.IsZero() {
+			t.Error("LegacyLastUpdateCheck should be cleared")
+		}
+	})
+
+	t.Run("saves in new format after migration", func(t *testing.T) {
+		statePath := filepath.Join(tmpDir, "migration_save.yaml")
+		// Old format
+		stateContent := `last_backup_success: 2024-01-15T09:00:00Z
+consecutive_failures: 2
+`
+		if err := os.WriteFile(statePath, []byte(stateContent), 0600); err != nil {
+			t.Fatalf("Failed to write test state: %v", err)
+		}
+
+		// Load (triggers migration)
+		s, err := LoadFromFile(statePath)
+		if err != nil {
+			t.Fatalf("LoadFromFile() error = %v", err)
+		}
+
+		// Save in new format
+		newPath := filepath.Join(tmpDir, "migration_save_new.yaml")
+		if err := s.SaveToFile(newPath); err != nil {
+			t.Fatalf("SaveToFile() error = %v", err)
+		}
+
+		// Read raw file content to verify format
+		content, err := os.ReadFile(newPath)
+		if err != nil {
+			t.Fatalf("Failed to read saved file: %v", err)
+		}
+
+		// Should contain nested structure, not flat
+		contentStr := string(content)
+		if !strings.Contains(contentStr, "backup:") {
+			t.Error("Saved file should contain 'backup:' nested key")
+		}
+		if strings.Contains(contentStr, "last_backup_success:") {
+			t.Error("Saved file should not contain legacy 'last_backup_success:' key")
+		}
+		if strings.Contains(contentStr, "consecutive_failures:") && !strings.Contains(contentStr, "  consecutive_failures:") {
+			t.Error("consecutive_failures should be nested under backup:")
+		}
+	})
 }

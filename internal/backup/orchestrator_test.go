@@ -193,8 +193,8 @@ func TestOrchestrator_TailscaleConnectionFailure(t *testing.T) {
 	}
 
 	// Should have recorded failure in state
-	if appState.ConsecutiveFailures != 1 {
-		t.Errorf("ConsecutiveFailures = %d, want 1", appState.ConsecutiveFailures)
+	if appState.Backup.ConsecutiveFailures != 1 {
+		t.Errorf("ConsecutiveFailures = %d, want 1", appState.Backup.ConsecutiveFailures)
 	}
 }
 
@@ -212,8 +212,8 @@ func TestOrchestrator_handleTailscaleFailure(t *testing.T) {
 	o.handleTailscaleFailure(testErr)
 
 	// Should have recorded failure
-	if appState.ConsecutiveFailures != 1 {
-		t.Errorf("ConsecutiveFailures = %d, want 1", appState.ConsecutiveFailures)
+	if appState.Backup.ConsecutiveFailures != 1 {
+		t.Errorf("ConsecutiveFailures = %d, want 1", appState.Backup.ConsecutiveFailures)
 	}
 
 	// Should have notified
@@ -227,7 +227,9 @@ func TestOrchestrator_handleTailscaleFailure(t *testing.T) {
 
 func TestOrchestrator_handleBackupSuccess(t *testing.T) {
 	appState := &state.State{
-		ConsecutiveFailures: 5, // Previous failures
+		Backup: state.BackupState{
+			ConsecutiveFailures: 5, // Previous failures
+		},
 	}
 	notifier := &mockNotifier{}
 
@@ -240,13 +242,13 @@ func TestOrchestrator_handleBackupSuccess(t *testing.T) {
 	o.handleBackupSuccess()
 
 	// Should have reset consecutive failures
-	if appState.ConsecutiveFailures != 0 {
-		t.Errorf("ConsecutiveFailures = %d, want 0", appState.ConsecutiveFailures)
+	if appState.Backup.ConsecutiveFailures != 0 {
+		t.Errorf("ConsecutiveFailures = %d, want 0", appState.Backup.ConsecutiveFailures)
 	}
 
 	// Should have recorded success time
-	if appState.LastBackupSuccess.IsZero() {
-		t.Error("LastBackupSuccess should be set")
+	if appState.Backup.LastSuccess.IsZero() {
+		t.Error("LastSuccess should be set")
 	}
 
 	// Should have notified success
@@ -270,11 +272,11 @@ func TestOrchestrator_recordFailure(t *testing.T) {
 	testErr := errors.New("backup failed")
 	o.recordFailure(testErr)
 
-	if appState.ConsecutiveFailures != 1 {
-		t.Errorf("ConsecutiveFailures = %d, want 1", appState.ConsecutiveFailures)
+	if appState.Backup.ConsecutiveFailures != 1 {
+		t.Errorf("ConsecutiveFailures = %d, want 1", appState.Backup.ConsecutiveFailures)
 	}
-	if appState.LastBackupError != "backup failed" {
-		t.Errorf("LastBackupError = %q, want %q", appState.LastBackupError, "backup failed")
+	if appState.Backup.LastError != "backup failed" {
+		t.Errorf("LastError = %q, want %q", appState.Backup.LastError, "backup failed")
 	}
 }
 

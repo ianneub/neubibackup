@@ -98,7 +98,11 @@ func TestMenuConfig_Callbacks(t *testing.T) {
 }
 
 func TestMenuConfig_StateProviders(t *testing.T) {
-	appState := &state.State{ConsecutiveFailures: 3}
+	appState := &state.State{
+		Backup: state.BackupState{
+			ConsecutiveFailures: 3,
+		},
+	}
 	backupState := &mockBackupState{running: true}
 	updateState := &mockUpdateState{hasUpdate: true, availableVersion: "1.2.3"}
 
@@ -109,7 +113,7 @@ func TestMenuConfig_StateProviders(t *testing.T) {
 		IsConfigured: func() bool { return true },
 	}
 
-	if cfg.AppState().ConsecutiveFailures != 3 {
+	if cfg.AppState().Backup.ConsecutiveFailures != 3 {
 		t.Error("AppState provider not working")
 	}
 

@@ -521,11 +521,13 @@ func TestCheckForUpdatesIfNeededRecent(t *testing.T) {
 
 	// Set state with recent check
 	app.state = &state.State{
-		LastUpdateCheck: time.Now(), // Just checked
+		Update: state.UpdateState{
+			LastCheck: time.Now(), // Just checked
+		},
 	}
 
 	// Verify the time check logic - recent check should be within 24 hours
-	if time.Since(app.state.LastUpdateCheck) >= 24*time.Hour {
+	if time.Since(app.state.Update.LastCheck) >= 24*time.Hour {
 		t.Error("should detect recent check time")
 	}
 
@@ -541,11 +543,13 @@ func TestCheckForUpdatesIfNeededOld(t *testing.T) {
 
 	// Set state with old check (more than 24 hours ago)
 	app.state = &state.State{
-		LastUpdateCheck: time.Now().Add(-25 * time.Hour),
+		Update: state.UpdateState{
+			LastCheck: time.Now().Add(-25 * time.Hour),
+		},
 	}
 
 	// Verify the time check logic
-	if time.Since(app.state.LastUpdateCheck) < 24*time.Hour {
+	if time.Since(app.state.Update.LastCheck) < 24*time.Hour {
 		t.Error("should detect old check time")
 	}
 
@@ -689,7 +693,9 @@ func TestUpdateIconWithFailedBackups(t *testing.T) {
 	)
 
 	app.state = &state.State{
-		ConsecutiveFailures: 3, // Simulate failed backups
+		Backup: state.BackupState{
+			ConsecutiveFailures: 3, // Simulate failed backups
+		},
 	}
 	app.cfg = &config.Config{
 		Repository: config.RepositoryConfig{
@@ -716,8 +722,10 @@ func TestUpdateIconWithSuccessfulBackup(t *testing.T) {
 	)
 
 	app.state = &state.State{
-		ConsecutiveFailures: 0,
-		LastBackupSuccess:   time.Now(), // Recent successful backup
+		Backup: state.BackupState{
+			ConsecutiveFailures: 0,
+			LastSuccess:         time.Now(), // Recent successful backup
+		},
 	}
 	app.cfg = &config.Config{
 		Repository: config.RepositoryConfig{

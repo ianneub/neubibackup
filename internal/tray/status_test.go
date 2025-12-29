@@ -30,7 +30,9 @@ func TestFormatStatus(t *testing.T) {
 		{
 			name: "never backed up with error",
 			state: &state.State{
-				LastBackupError: "connection failed",
+				Backup: state.BackupState{
+					LastError: "connection failed",
+				},
 			},
 			isRunning: false,
 			want:      "Last backup failed",
@@ -38,7 +40,9 @@ func TestFormatStatus(t *testing.T) {
 		{
 			name: "backed up recently",
 			state: &state.State{
-				LastBackupSuccess: time.Now().Add(-30 * time.Second),
+				Backup: state.BackupState{
+					LastSuccess: time.Now().Add(-30 * time.Second),
+				},
 			},
 			isRunning: false,
 			want:      "Last backup: just now",
@@ -46,7 +50,9 @@ func TestFormatStatus(t *testing.T) {
 		{
 			name: "backed up 5 minutes ago",
 			state: &state.State{
-				LastBackupSuccess: time.Now().Add(-5 * time.Minute),
+				Backup: state.BackupState{
+					LastSuccess: time.Now().Add(-5 * time.Minute),
+				},
 			},
 			isRunning: false,
 			want:      "Last backup: 5 minutes ago",
@@ -54,7 +60,9 @@ func TestFormatStatus(t *testing.T) {
 		{
 			name: "backed up 2 hours ago",
 			state: &state.State{
-				LastBackupSuccess: time.Now().Add(-2 * time.Hour),
+				Backup: state.BackupState{
+					LastSuccess: time.Now().Add(-2 * time.Hour),
+				},
 			},
 			isRunning: false,
 			want:      "Last backup: 2 hours ago",
@@ -62,7 +70,9 @@ func TestFormatStatus(t *testing.T) {
 		{
 			name: "backed up 3 days ago",
 			state: &state.State{
-				LastBackupSuccess: time.Now().Add(-3 * 24 * time.Hour),
+				Backup: state.BackupState{
+					LastSuccess: time.Now().Add(-3 * 24 * time.Hour),
+				},
 			},
 			isRunning: false,
 			want:      "Last backup: 3 days ago",
@@ -95,8 +105,10 @@ func TestFormatStatusDetailed(t *testing.T) {
 		{
 			name: "failed with attempts",
 			state: &state.State{
-				LastBackupError:     "network timeout",
-				ConsecutiveFailures: 3,
+				Backup: state.BackupState{
+					LastError:           "network timeout",
+					ConsecutiveFailures: 3,
+				},
 			},
 			isRunning: false,
 			want:      "Failed (3 attempts): network timeout",
@@ -104,8 +116,10 @@ func TestFormatStatusDetailed(t *testing.T) {
 		{
 			name: "error but zero failures (shouldn't happen, but handle it)",
 			state: &state.State{
-				LastBackupError:     "some error",
-				ConsecutiveFailures: 0,
+				Backup: state.BackupState{
+					LastError:           "some error",
+					ConsecutiveFailures: 0,
+				},
 			},
 			isRunning: false,
 			want:      "Last backup failed",

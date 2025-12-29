@@ -183,25 +183,44 @@ func TestNextBackupTime(t *testing.T) {
 	loc := time.Local
 	now := time.Now().In(loc)
 
+	// Calculate times that won't wrap around midnight
+	// For "future today": use 23:59 which is always later today (unless it's already 23:59)
+	// For "passed today": use 00:01 which is always earlier today (unless it's 00:00)
+	futureTime := "23:59"
+	pastTime := "00:01"
+
+	// Handle edge cases: if we're too close to the boundary times, skip those tests
+	currentHour := now.Hour()
+	currentMinute := now.Minute()
+
 	tests := []struct {
 		name         string
 		scheduleTime string
 		wantToday    bool // true if should return today, false if tomorrow
+		skip         bool
 	}{
 		{
 			name:         "schedule in future today",
-			scheduleTime: now.Add(2 * time.Hour).Format("15:04"),
+			scheduleTime: futureTime,
 			wantToday:    true,
+			// Skip if it's already 23:59
+			skip: currentHour == 23 && currentMinute >= 59,
 		},
 		{
 			name:         "schedule passed today",
-			scheduleTime: now.Add(-2 * time.Hour).Format("15:04"),
+			scheduleTime: pastTime,
 			wantToday:    false,
+			// Skip if it's 00:00 or 00:01 (schedule hasn't passed yet)
+			skip: currentHour == 0 && currentMinute <= 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.skip {
+				t.Skip("Skipping due to edge case near midnight")
+			}
+
 			cfg := &config.Config{
 				Schedule: config.ScheduleConfig{
 					Time: tt.scheduleTime,

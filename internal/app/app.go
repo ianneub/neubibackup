@@ -36,6 +36,7 @@ type App struct {
 	powerWatcher  *power.Watcher
 	configWatcher *fsnotify.Watcher
 	appUpdater    *updater.Updater
+	updateOrch    *updater.UpdateOrchestrator
 
 	// Tickers
 	statusTicker *time.Ticker
@@ -179,14 +180,24 @@ func (a *App) Initialize() error {
 		OnQuit:        a.onQuit,
 	})
 
-	// Initialize updater
+	// Initialize updater and orchestrator
 	a.appUpdater = updater.New(a.version, "ianneub", "neubibackup")
+	// Note: updateOrch is initialized in Run() after menu is fully set up
 
 	return nil
 }
 
 // Run starts the background goroutines. Call this after Initialize().
 func (a *App) Run() error {
+	// Initialize update orchestrator now that menu is ready
+	a.updateOrch = updater.NewUpdateOrchestrator(
+		a.appUpdater,
+		a.state,
+		a.backupState,
+		a.updateState,
+		a.menu,
+	)
+
 	// Start config file watcher
 	go a.watchConfigFile()
 
@@ -213,7 +224,7 @@ func (a *App) Run() error {
 	}()
 
 	// Check for updates on startup if needed
-	go a.checkForUpdatesIfNeeded()
+	go a.updateOrch.CheckIfNeeded(a.ctx)
 
 	// Start background update checker (every 24 hours)
 	a.updateTicker = time.NewTicker(24 * time.Hour)
@@ -223,7 +234,7 @@ func (a *App) Run() error {
 			case <-a.ctx.Done():
 				return
 			case <-a.updateTicker.C:
-				a.checkForUpdates()
+				a.updateOrch.Check(a.ctx)
 			}
 		}
 	}()
@@ -334,11 +345,7 @@ func (a *App) openAppLog() {
 }
 
 func (a *App) handleUpdateClick() {
-	if a.updateState.HasUpdate() {
-		go a.installUpdate()
-	} else {
-		go a.manualUpdateCheck()
-	}
+	a.updateOrch.HandleUpdateClick(a.ctx)
 }
 
 func (a *App) initScheduler() {
@@ -537,189 +544,6 @@ func (a *App) ReloadConfig() {
 	}
 
 	log.Println("Config reloaded successfully")
-}
-
-// Update checking functions
-
-func (a *App) checkForUpdatesIfNeeded() {
-	// Skip if we checked recently (within 24 hours)
-	if time.Since(a.state.LastUpdateCheck) < 24*time.Hour {
-		log.Println("Skipping update check - checked recently")
-		return
-	}
-	a.checkForUpdates()
-}
-
-func (a *App) manualUpdateCheck() {
-	if a.menu != nil {
-		a.menu.SetUpdateStatus("Checking for updates...", false)
-	}
-
-	a.checkForUpdates()
-
-	// Re-enable the menu item if no update was found
-	if !a.updateState.HasUpdate() && a.menu != nil {
-		a.menu.SetUpdateStatus("Check for Updates", true)
-	}
-}
-
-func (a *App) checkForUpdates() {
-	log.Println("Checking for updates...")
-
-	newVersion, available, err := a.appUpdater.CheckForUpdate(a.ctx)
-	if err != nil {
-		log.Printf("Update check failed: %v", err)
-		return
-	}
-
-	// Record the check time
-	a.state.LastUpdateCheck = time.Now()
-	if err := a.state.Save(); err != nil {
-		log.Printf("Error saving state: %v", err)
-	}
-
-	if available {
-		a.updateState.SetAvailableVersion(newVersion)
-		if a.menu != nil {
-			a.menu.SetUpdateStatus(fmt.Sprintf("Update Available (%s)", newVersion), true)
-		}
-		log.Printf("Update available: %s", newVersion)
-
-		// Trigger automatic update in background
-		go a.attemptAutoUpdate(newVersion)
-	} else {
-		log.Println("No update available")
-	}
-}
-
-// attemptAutoUpdate tries to apply an update automatically in the background.
-// It waits for any running backup to complete before applying.
-func (a *App) attemptAutoUpdate(version string) {
-	if !a.updateState.TryStartUpdate() {
-		log.Println("Auto-update: already in progress, skipping")
-		return
-	}
-
-	defer a.updateState.FinishUpdate()
-
-	// Wait for backup to complete if running (with timeout)
-	waitStart := time.Now()
-	maxWait := 2 * time.Hour
-
-	for {
-		if !a.backupState.IsRunning() {
-			break
-		}
-
-		if time.Since(waitStart) > maxWait {
-			log.Println("Auto-update: gave up waiting for backup to complete")
-			return
-		}
-
-		log.Println("Auto-update: waiting for backup to complete...")
-		select {
-		case <-a.ctx.Done():
-			return
-		case <-time.After(30 * time.Second):
-			// Continue waiting
-		}
-	}
-
-	// Check if we're still supposed to run
-	select {
-	case <-a.ctx.Done():
-		return
-	default:
-	}
-
-	// Apply the update
-	log.Printf("Auto-update: applying update to %s...", version)
-	if a.menu != nil {
-		a.menu.SetUpdateStatus("Updating...", false)
-	}
-
-	if err := a.appUpdater.DownloadAndApply(a.ctx); err != nil {
-		log.Printf("Auto-update failed: %v", err)
-		if a.menu != nil {
-			a.menu.SetUpdateStatus(fmt.Sprintf("Update failed (%s)", version), true)
-		}
-
-		// Record error in state
-		a.state.LastUpdateError = err.Error()
-		a.state.LastUpdateErrorTime = time.Now()
-		if saveErr := a.state.Save(); saveErr != nil {
-			log.Printf("Error saving state: %v", saveErr)
-		}
-		return
-	}
-
-	// Update succeeded
-	log.Printf("Auto-update: successfully updated to %s, restarting...", version)
-
-	// Record successful update
-	a.state.LastUpdateVersion = version
-	a.state.LastUpdateTime = time.Now()
-	a.state.LastUpdateError = ""
-	if err := a.state.Save(); err != nil {
-		log.Printf("Error saving state: %v", err)
-	}
-
-	// Restart the application
-	if err := updater.Restart(); err != nil {
-		log.Printf("Auto-update: restart failed: %v", err)
-		if a.menu != nil {
-			a.menu.SetUpdateStatus("Updated - please restart manually", true)
-		}
-	}
-}
-
-func (a *App) installUpdate() {
-	// Prevent update during backup
-	if a.backupState.IsRunning() {
-		log.Println("Cannot update while backup is running")
-		if a.menu != nil {
-			a.menu.SetUpdateStatus("Update blocked - backup running", true)
-		}
-		return
-	}
-
-	availableVersion := a.updateState.GetAvailableVersion()
-
-	if a.menu != nil {
-		a.menu.SetUpdateStatus("Downloading update...", false)
-	}
-
-	log.Printf("Installing update to %s...", availableVersion)
-
-	if err := a.appUpdater.DownloadAndApply(a.ctx); err != nil {
-		log.Printf("Update failed: %v", err)
-		if a.menu != nil {
-			a.menu.SetUpdateStatus("Update failed - click to retry", true)
-		}
-		return
-	}
-
-	// Update succeeded
-	log.Println("Update installed successfully, restarting...")
-	if a.menu != nil {
-		a.menu.SetUpdateStatus("Update installed - restarting...", false)
-	}
-
-	// Record successful update
-	a.state.LastUpdateVersion = availableVersion
-	a.state.LastUpdateTime = time.Now()
-	a.state.LastUpdateError = ""
-	if err := a.state.Save(); err != nil {
-		log.Printf("Error saving state: %v", err)
-	}
-
-	// Restart the application
-	if err := updater.Restart(); err != nil {
-		log.Printf("Restart failed: %v", err)
-		if a.menu != nil {
-			a.menu.SetUpdateStatus("Updated - please restart manually", true)
-		}
-	}
 }
 
 // IsBackupRunning returns whether a backup is currently running.

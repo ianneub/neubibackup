@@ -524,9 +524,13 @@ func TestCheckForUpdatesIfNeededRecent(t *testing.T) {
 		LastUpdateCheck: time.Now(), // Just checked
 	}
 
-	// This should skip the check and return immediately
-	// (It logs "Skipping update check - checked recently")
-	app.checkForUpdatesIfNeeded()
+	// Verify the time check logic - recent check should be within 24 hours
+	if time.Since(app.state.LastUpdateCheck) >= 24*time.Hour {
+		t.Error("should detect recent check time")
+	}
+
+	// Note: The actual check is now done via updateOrch.CheckIfNeeded()
+	// which is tested in internal/updater/orchestrator_test.go
 }
 
 // TestCheckForUpdatesIfNeededOld tests that old check would trigger new check

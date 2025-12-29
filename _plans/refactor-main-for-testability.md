@@ -293,27 +293,72 @@ func (a *App) ReloadConfig()
 
 ---
 
-### Phase 5: Extract Update Orchestration
+### Phase 5: Extract Update Orchestration - COMPLETED
 
-**Files to create:**
-- `internal/updater/orchestrator.go`
+**Status:** Completed
+
+**Files created:**
+- `internal/updater/orchestrator.go` (251 lines) - UpdateOrchestrator struct with interfaces
+- `internal/updater/orchestrator_test.go` (486 lines) - Comprehensive tests with mocks
+
+**Files modified:**
+- `internal/app/app.go` - Reduced from 786 lines to 609 lines (-177 lines)
+- `internal/state/state.go` - Added StateProvider interface methods
+
+**Implemented interfaces:**
+```go
+type BackupChecker interface {
+    IsRunning() bool
+}
+
+type UpdateStateProvider interface {
+    HasUpdate() bool
+    GetAvailableVersion() string
+    SetAvailableVersion(version string)
+    TryStartUpdate() bool
+    FinishUpdate()
+}
+
+type MenuUpdater interface {
+    SetUpdateStatus(text string, enabled bool)
+}
+
+type StateProvider interface {
+    GetLastUpdateCheck() time.Time
+    SetLastUpdateCheck(t time.Time)
+    SetLastUpdateError(err string, t time.Time)
+    SetLastUpdateSuccess(version string, t time.Time)
+    Save() error
+}
+```
 
 **Key type:**
 ```go
 type UpdateOrchestrator struct {
     updater       *Updater
-    state         *state.State
-    backupChecker interface{ IsBackupRunning() bool }
-    updateState   *app.UpdateState
+    state         StateProvider
+    backupChecker BackupChecker
+    updateState   UpdateStateProvider
+    menuUpdater   MenuUpdater
 }
 
-func (o *UpdateOrchestrator) CheckForUpdates(ctx context.Context) (string, bool, error)
-func (o *UpdateOrchestrator) AutoUpdate(ctx context.Context, version string) error
+func (o *UpdateOrchestrator) CheckIfNeeded(ctx context.Context)
+func (o *UpdateOrchestrator) ManualCheck(ctx context.Context)
+func (o *UpdateOrchestrator) Check(ctx context.Context)
+func (o *UpdateOrchestrator) AttemptAutoUpdate(ctx context.Context, version string)
+func (o *UpdateOrchestrator) Install(ctx context.Context)
+func (o *UpdateOrchestrator) HandleUpdateClick(ctx context.Context)
 ```
 
-**Migration:** Extract `attemptAutoUpdate()` (87 lines), `checkForUpdates()`.
+**Migration completed:**
+- Extracted `checkForUpdatesIfNeeded()` → `CheckIfNeeded()`
+- Extracted `manualUpdateCheck()` → `ManualCheck()`
+- Extracted `checkForUpdates()` → `Check()`
+- Extracted `attemptAutoUpdate()` → `AttemptAutoUpdate()`
+- Extracted `installUpdate()` → `Install()`
+- Added `HandleUpdateClick()` to encapsulate update click handling
 
-**Tests:** Update checking, waiting for backup to complete, state transitions.
+**Tests:** All tests pass with `-race` flag
 
 ---
 
@@ -388,8 +433,8 @@ func onExit() {
 | `internal/tray/menu_test.go` | Menu tests | ✅ Created |
 | `internal/tray/icon.go` | Icon state logic | ✅ Created |
 | `internal/tray/icon_test.go` | Icon tests | ✅ Created |
-| `internal/updater/orchestrator.go` | Auto-update orchestration | Pending (Phase 5) |
-| `internal/updater/orchestrator_test.go` | Update orchestrator tests | Pending (Phase 5) |
+| `internal/updater/orchestrator.go` | Auto-update orchestration | ✅ Created |
+| `internal/updater/orchestrator_test.go` | Update orchestrator tests | ✅ Created |
 
 ## Testing Strategy
 

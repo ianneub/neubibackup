@@ -116,3 +116,26 @@ func (s *State) HasBackedUpToday(loc *time.Location) bool {
 		now.Month() == last.Month() &&
 		now.Day() == last.Day()
 }
+
+// GetLastUpdateCheck returns the time of the last update check.
+func (s *State) GetLastUpdateCheck() time.Time {
+	return s.LastUpdateCheck
+}
+
+// SetLastUpdateCheck sets the time of the last update check.
+func (s *State) SetLastUpdateCheck(t time.Time) {
+	s.LastUpdateCheck = t
+}
+
+// SetLastUpdateError records an update error.
+func (s *State) SetLastUpdateError(err string, t time.Time) {
+	s.LastUpdateError = err
+	s.LastUpdateErrorTime = t
+}
+
+// SetLastUpdateSuccess records a successful update.
+func (s *State) SetLastUpdateSuccess(version string, t time.Time) {
+	s.LastUpdateVersion = version
+	s.LastUpdateTime = t
+	s.LastUpdateError = ""
+}

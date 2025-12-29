@@ -36,17 +36,6 @@ type State struct {
 	mu     sync.RWMutex `yaml:"-"` // Protects all fields below
 	Backup BackupState  `yaml:"backup,omitempty"`
 	Update UpdateState  `yaml:"update,omitempty"`
-
-	// Legacy fields for backward compatibility (omitempty so they won't save)
-	LegacyLastBackupAttempt   time.Time `yaml:"last_backup_attempt,omitempty"`
-	LegacyLastBackupSuccess   time.Time `yaml:"last_backup_success,omitempty"`
-	LegacyLastBackupError     string    `yaml:"last_backup_error,omitempty"`
-	LegacyConsecutiveFailures int       `yaml:"consecutive_failures,omitempty"`
-	LegacyLastUpdateCheck     time.Time `yaml:"last_update_check,omitempty"`
-	LegacyLastUpdateVersion   string    `yaml:"last_update_version,omitempty"`
-	LegacyLastUpdateTime      time.Time `yaml:"last_update_time,omitempty"`
-	LegacyLastUpdateError     string    `yaml:"last_update_error,omitempty"`
-	LegacyLastUpdateErrorTime time.Time `yaml:"last_update_error_time,omitempty"`
 }
 
 // Load reads the state from the default state file.
@@ -75,59 +64,10 @@ func LoadFromFile(path string) (*State, error) {
 		return nil, fmt.Errorf("parsing state file: %w", err)
 	}
 
-	// Migrate legacy fields to nested structure
-	s.migrate()
-
 	log.Printf("State loaded: backup.last_success=%v, backup.consecutive_failures=%d",
 		s.Backup.LastSuccess, s.Backup.ConsecutiveFailures)
 
 	return &s, nil
-}
-
-// migrate converts legacy flat fields to the new nested structure.
-// This is called after loading to support old state.yaml files.
-func (s *State) migrate() {
-	// Migrate backup fields if legacy fields have values but nested fields don't
-	if !s.LegacyLastBackupAttempt.IsZero() && s.Backup.LastAttempt.IsZero() {
-		s.Backup.LastAttempt = s.LegacyLastBackupAttempt
-	}
-	if !s.LegacyLastBackupSuccess.IsZero() && s.Backup.LastSuccess.IsZero() {
-		s.Backup.LastSuccess = s.LegacyLastBackupSuccess
-	}
-	if s.LegacyLastBackupError != "" && s.Backup.LastError == "" {
-		s.Backup.LastError = s.LegacyLastBackupError
-	}
-	if s.LegacyConsecutiveFailures != 0 && s.Backup.ConsecutiveFailures == 0 {
-		s.Backup.ConsecutiveFailures = s.LegacyConsecutiveFailures
-	}
-
-	// Migrate update fields
-	if !s.LegacyLastUpdateCheck.IsZero() && s.Update.LastCheck.IsZero() {
-		s.Update.LastCheck = s.LegacyLastUpdateCheck
-	}
-	if s.LegacyLastUpdateVersion != "" && s.Update.LastVersion == "" {
-		s.Update.LastVersion = s.LegacyLastUpdateVersion
-	}
-	if !s.LegacyLastUpdateTime.IsZero() && s.Update.LastTime.IsZero() {
-		s.Update.LastTime = s.LegacyLastUpdateTime
-	}
-	if s.LegacyLastUpdateError != "" && s.Update.LastError == "" {
-		s.Update.LastError = s.LegacyLastUpdateError
-	}
-	if !s.LegacyLastUpdateErrorTime.IsZero() && s.Update.LastErrorTime.IsZero() {
-		s.Update.LastErrorTime = s.LegacyLastUpdateErrorTime
-	}
-
-	// Clear legacy fields so they won't be saved
-	s.LegacyLastBackupAttempt = time.Time{}
-	s.LegacyLastBackupSuccess = time.Time{}
-	s.LegacyLastBackupError = ""
-	s.LegacyConsecutiveFailures = 0
-	s.LegacyLastUpdateCheck = time.Time{}
-	s.LegacyLastUpdateVersion = ""
-	s.LegacyLastUpdateTime = time.Time{}
-	s.LegacyLastUpdateError = ""
-	s.LegacyLastUpdateErrorTime = time.Time{}
 }
 
 // Save writes the state to the default state file.

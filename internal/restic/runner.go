@@ -111,18 +111,8 @@ func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer,
 func buildBackupArgs(cfg *config.Config) []string {
 	args := []string{"backup", "--json"}
 
-	// Add global args
-	args = append(args, cfg.ResticArgs.Global...)
-
-	// Repository
-	args = append(args, "-r", cfg.Repository.Path)
-
-	// Password source
-	if cfg.Repository.PasswordFile != "" {
-		args = append(args, "--password-file", cfg.Repository.PasswordFile)
-	} else if cfg.Repository.PasswordCommand != "" {
-		args = append(args, "--password-command", cfg.Repository.PasswordCommand)
-	}
+	// Add repository args (global args, repo path, password)
+	args = append(args, buildRepoArgs(cfg)...)
 
 	// Excludes
 	for _, exclude := range cfg.Backup.Excludes {
@@ -163,6 +153,21 @@ func containsArg(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+// buildRepoArgs returns the common arguments for repository access:
+// global args, repository path, and password source.
+func buildRepoArgs(cfg *config.Config) []string {
+	args := append([]string{}, cfg.ResticArgs.Global...)
+	args = append(args, "-r", cfg.Repository.Path)
+
+	if cfg.Repository.PasswordFile != "" {
+		args = append(args, "--password-file", cfg.Repository.PasswordFile)
+	} else if cfg.Repository.PasswordCommand != "" {
+		args = append(args, "--password-command", cfg.Repository.PasswordCommand)
+	}
+
+	return args
 }
 
 func buildEnv(cfg *config.Config, proxyAddr string) []string {
@@ -288,15 +293,7 @@ func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, pr
 	}
 
 	args := []string{command}
-	args = append(args, cfg.ResticArgs.Global...)
-	args = append(args, "-r", cfg.Repository.Path)
-
-	if cfg.Repository.PasswordFile != "" {
-		args = append(args, "--password-file", cfg.Repository.PasswordFile)
-	} else if cfg.Repository.PasswordCommand != "" {
-		args = append(args, "--password-command", cfg.Repository.PasswordCommand)
-	}
-
+	args = append(args, buildRepoArgs(cfg)...)
 	args = append(args, extraArgs...)
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
@@ -317,14 +314,7 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 
 	// Build args for "snapshots" command to check if repo exists
 	args := []string{"snapshots", "--json"}
-	args = append(args, cfg.ResticArgs.Global...)
-	args = append(args, "-r", cfg.Repository.Path)
-
-	if cfg.Repository.PasswordFile != "" {
-		args = append(args, "--password-file", cfg.Repository.PasswordFile)
-	} else if cfg.Repository.PasswordCommand != "" {
-		args = append(args, "--password-command", cfg.Repository.PasswordCommand)
-	}
+	args = append(args, buildRepoArgs(cfg)...)
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	configureCmd(cmd)
@@ -341,14 +331,7 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 	fmt.Fprintf(logWriter, "Repository not found, initializing...\n")
 
 	initArgs := []string{"init"}
-	initArgs = append(initArgs, cfg.ResticArgs.Global...)
-	initArgs = append(initArgs, "-r", cfg.Repository.Path)
-
-	if cfg.Repository.PasswordFile != "" {
-		initArgs = append(initArgs, "--password-file", cfg.Repository.PasswordFile)
-	} else if cfg.Repository.PasswordCommand != "" {
-		initArgs = append(initArgs, "--password-command", cfg.Repository.PasswordCommand)
-	}
+	initArgs = append(initArgs, buildRepoArgs(cfg)...)
 
 	initCmd := exec.CommandContext(ctx, binaryPath, initArgs...)
 	configureCmd(initCmd)

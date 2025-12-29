@@ -2,6 +2,8 @@
 package backup
 
 import (
+	"errors"
+
 	"neubibackup/internal/config"
 	"neubibackup/internal/healthchecks"
 	"neubibackup/internal/pushover"
@@ -72,30 +74,32 @@ func (n *CompositeNotifier) NotifyStart() error {
 
 // NotifySuccess signals that a backup completed successfully.
 // Sends success pings to healthchecks.io and pushover if configured.
+// Returns a combined error if any notifications fail.
 func (n *CompositeNotifier) NotifySuccess(message string) error {
-	var firstErr error
+	var errs []error
 
 	// Healthchecks success ping
 	if n.healthchecks != nil {
-		if err := n.healthchecks.Success(); err != nil && firstErr == nil {
-			firstErr = err
+		if err := n.healthchecks.Success(); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
 	// Pushover success notification (if configured for success)
 	if n.pushover != nil && n.pushoverCfg.OnSuccess {
-		if err := n.pushover.SendSuccess(message); err != nil && firstErr == nil {
-			firstErr = err
+		if err := n.pushover.SendSuccess(message); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
-	return firstErr
+	return errors.Join(errs...)
 }
 
 // NotifyFailure signals that a backup failed.
 // Sends failure pings to healthchecks.io (with logs if configured) and pushover.
+// Returns a combined error if any notifications fail.
 func (n *CompositeNotifier) NotifyFailure(errMsg string, logs string) error {
-	var firstErr error
+	var errs []error
 
 	// Healthchecks fail ping
 	if n.healthchecks != nil {
@@ -103,19 +107,19 @@ func (n *CompositeNotifier) NotifyFailure(errMsg string, logs string) error {
 		if n.hcCfg.SendLogsOnFailure {
 			logsToSend = logs
 		}
-		if err := n.healthchecks.Fail(logsToSend); err != nil && firstErr == nil {
-			firstErr = err
+		if err := n.healthchecks.Fail(logsToSend); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
 	// Pushover failure notification
 	if n.pushover != nil && n.pushoverCfg.OnFailure {
-		if err := n.pushover.SendFailure(errMsg); err != nil && firstErr == nil {
-			firstErr = err
+		if err := n.pushover.SendFailure(errMsg); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
-	return firstErr
+	return errors.Join(errs...)
 }
 
 // NotifyCancelled signals that a backup was cancelled by the user.

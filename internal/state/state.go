@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"neubibackup/internal/config"
@@ -30,9 +31,11 @@ type UpdateState struct {
 }
 
 // State represents the application state.
+// All methods are thread-safe and can be called from multiple goroutines.
 type State struct {
-	Backup BackupState `yaml:"backup,omitempty"`
-	Update UpdateState `yaml:"update,omitempty"`
+	mu     sync.RWMutex `yaml:"-"` // Protects all fields below
+	Backup BackupState  `yaml:"backup,omitempty"`
+	Update UpdateState  `yaml:"update,omitempty"`
 
 	// Legacy fields for backward compatibility (omitempty so they won't save)
 	LegacyLastBackupAttempt   time.Time `yaml:"last_backup_attempt,omitempty"`
@@ -129,6 +132,9 @@ func (s *State) migrate() {
 
 // Save writes the state to the default state file.
 func (s *State) Save() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	// Warn if we're about to save state with zero LastSuccess but non-zero LastAttempt
 	// This could indicate a bug where state was not properly loaded
 	if s.Backup.LastSuccess.IsZero() && !s.Backup.LastAttempt.IsZero() {
@@ -140,11 +146,18 @@ func (s *State) Save() error {
 	if err != nil {
 		return fmt.Errorf("getting state path: %w", err)
 	}
-	return s.SaveToFile(statePath)
+	return s.saveToFileLocked(statePath)
 }
 
 // SaveToFile writes the state to a specific file.
 func (s *State) SaveToFile(path string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.saveToFileLocked(path)
+}
+
+// saveToFileLocked writes the state to a specific file. Caller must hold s.mu.
+func (s *State) saveToFileLocked(path string) error {
 	data, err := yaml.Marshal(s)
 	if err != nil {
 		return fmt.Errorf("marshaling state: %w", err)
@@ -159,6 +172,9 @@ func (s *State) SaveToFile(path string) error {
 
 // RecordSuccess updates the state after a successful backup.
 func (s *State) RecordSuccess() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	now := time.Now()
 	s.Backup.LastAttempt = now
 	s.Backup.LastSuccess = now
@@ -168,6 +184,9 @@ func (s *State) RecordSuccess() {
 
 // RecordFailure updates the state after a failed backup.
 func (s *State) RecordFailure(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.Backup.LastAttempt = time.Now()
 	s.Backup.LastError = err.Error()
 	s.Backup.ConsecutiveFailures++
@@ -176,6 +195,9 @@ func (s *State) RecordFailure(err error) {
 // LastSuccessAge returns how long ago the last successful backup was.
 // Returns a zero duration if there has never been a successful backup.
 func (s *State) LastSuccessAge() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if s.Backup.LastSuccess.IsZero() {
 		return 0
 	}
@@ -184,6 +206,9 @@ func (s *State) LastSuccessAge() time.Duration {
 
 // HasBackedUpToday returns true if there was a successful backup today.
 func (s *State) HasBackedUpToday(loc *time.Location) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if s.Backup.LastSuccess.IsZero() {
 		return false
 	}
@@ -198,22 +223,30 @@ func (s *State) HasBackedUpToday(loc *time.Location) bool {
 
 // GetLastUpdateCheck returns the time of the last update check.
 func (s *State) GetLastUpdateCheck() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.Update.LastCheck
 }
 
 // SetLastUpdateCheck sets the time of the last update check.
 func (s *State) SetLastUpdateCheck(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Update.LastCheck = t
 }
 
 // SetLastUpdateError records an update error.
 func (s *State) SetLastUpdateError(err string, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Update.LastError = err
 	s.Update.LastErrorTime = t
 }
 
 // SetLastUpdateSuccess records a successful update.
 func (s *State) SetLastUpdateSuccess(version string, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Update.LastVersion = version
 	s.Update.LastTime = t
 	s.Update.LastError = ""

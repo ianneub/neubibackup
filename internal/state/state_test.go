@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -484,4 +485,105 @@ update:
 	if !s2.Backup.LastSuccess.Equal(originalLastSuccess) {
 		t.Errorf("Backup.LastSuccess changed: got %v, want %v", s2.Backup.LastSuccess, originalLastSuccess)
 	}
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	// Test that concurrent access to State is safe.
+	// This test verifies the mutex protection works correctly.
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "state.yaml")
+
+	s := &State{
+		Backup: BackupState{
+			LastSuccess: time.Now(),
+		},
+	}
+
+	// Use WaitGroup to coordinate goroutines
+	var wg sync.WaitGroup
+	const numGoroutines = 10
+	const numOperations = 100
+
+	// Goroutines that call RecordSuccess
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				s.RecordSuccess()
+			}
+		}()
+	}
+
+	// Goroutines that call RecordFailure
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				s.RecordFailure(errors.New("test error"))
+			}
+		}()
+	}
+
+	// Goroutines that read HasBackedUpToday
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				_ = s.HasBackedUpToday(time.Local)
+			}
+		}()
+	}
+
+	// Goroutines that read LastSuccessAge
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				_ = s.LastSuccessAge()
+			}
+		}()
+	}
+
+	// Goroutines that call SetLastUpdateCheck
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				s.SetLastUpdateCheck(time.Now())
+			}
+		}()
+	}
+
+	// Goroutines that call GetLastUpdateCheck
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				_ = s.GetLastUpdateCheck()
+			}
+		}()
+	}
+
+	// Goroutines that save state
+	for i := 0; i < numGoroutines/2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations/10; j++ {
+				_ = s.SaveToFile(statePath)
+			}
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	// If we get here without data races or panics, the mutex is working
+	t.Log("Concurrent access test completed without race conditions")
 }

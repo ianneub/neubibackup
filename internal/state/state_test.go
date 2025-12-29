@@ -432,3 +432,56 @@ consecutive_failures: 2
 		}
 	})
 }
+
+func TestStatePreservation_UpdateDoesNotAffectBackup(t *testing.T) {
+	// Regression test: modifying Update fields and saving should not affect Backup fields
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "state.yaml")
+
+	// Create initial state with valid backup timestamps
+	initialContent := `backup:
+  last_attempt: 2025-12-28T10:00:00Z
+  last_success: 2025-12-28T10:00:00Z
+  last_error: ""
+  consecutive_failures: 0
+update:
+  last_check: 2025-12-28T09:00:00Z
+`
+	if err := os.WriteFile(statePath, []byte(initialContent), 0600); err != nil {
+		t.Fatalf("Failed to write initial state: %v", err)
+	}
+
+	// Load state
+	s, err := LoadFromFile(statePath)
+	if err != nil {
+		t.Fatalf("LoadFromFile() error = %v", err)
+	}
+
+	// Verify backup.last_success was loaded correctly
+	if s.Backup.LastSuccess.IsZero() {
+		t.Fatal("Backup.LastSuccess should not be zero after load")
+	}
+	originalLastSuccess := s.Backup.LastSuccess
+
+	// Modify only Update fields (simulating what update orchestrator does)
+	s.Update.LastCheck = time.Now()
+
+	// Save state
+	if err := s.SaveToFile(statePath); err != nil {
+		t.Fatalf("SaveToFile() error = %v", err)
+	}
+
+	// Reload state
+	s2, err := LoadFromFile(statePath)
+	if err != nil {
+		t.Fatalf("LoadFromFile() after save error = %v", err)
+	}
+
+	// Verify backup.last_success is preserved
+	if s2.Backup.LastSuccess.IsZero() {
+		t.Error("Backup.LastSuccess should not be zero after reload")
+	}
+	if !s2.Backup.LastSuccess.Equal(originalLastSuccess) {
+		t.Errorf("Backup.LastSuccess changed: got %v, want %v", s2.Backup.LastSuccess, originalLastSuccess)
+	}
+}

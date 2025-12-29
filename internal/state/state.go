@@ -3,6 +3,7 @@ package state
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -74,6 +75,9 @@ func LoadFromFile(path string) (*State, error) {
 	// Migrate legacy fields to nested structure
 	s.migrate()
 
+	log.Printf("State loaded: backup.last_success=%v, backup.consecutive_failures=%d",
+		s.Backup.LastSuccess, s.Backup.ConsecutiveFailures)
+
 	return &s, nil
 }
 
@@ -125,6 +129,13 @@ func (s *State) migrate() {
 
 // Save writes the state to the default state file.
 func (s *State) Save() error {
+	// Warn if we're about to save state with zero LastSuccess but non-zero LastAttempt
+	// This could indicate a bug where state was not properly loaded
+	if s.Backup.LastSuccess.IsZero() && !s.Backup.LastAttempt.IsZero() {
+		log.Printf("WARNING: Saving state with zero LastSuccess but LastAttempt=%v - this may indicate a state loading issue",
+			s.Backup.LastAttempt)
+	}
+
 	statePath, err := config.GetStatePath()
 	if err != nil {
 		return fmt.Errorf("getting state path: %w", err)

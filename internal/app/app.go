@@ -132,7 +132,7 @@ func (a *App) Initialize() error {
 	// Load state early (needed for macOS FDA check)
 	a.state, err = state.Load()
 	if err != nil {
-		log.Printf("Error loading state: %v", err)
+		log.Printf("ERROR loading state (backup history may be lost): %v", err)
 		a.state = &state.State{}
 	}
 

@@ -1,7 +1,9 @@
 package restic
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -54,6 +56,11 @@ func RunBackup(ctx context.Context, cfg *config.Config, logWriter io.Writer, pro
 
 		lastErr = err
 		fmt.Fprintf(logWriter, "\nBackup failed: %v\n", err)
+
+		// Don't retry password errors - they require user intervention
+		if errors.Is(err, ErrPasswordFailed) {
+			return err
+		}
 
 		// Check if context was cancelled
 		if ctx.Err() != nil {
@@ -306,6 +313,7 @@ func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, pr
 }
 
 // ensureRepositoryExists checks if the repository exists and initializes it if not.
+// Returns ErrPasswordFailed if the password command fails (should not be retried).
 func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string) error {
 	binaryPath, err := GetBinaryPath()
 	if err != nil {
@@ -320,14 +328,35 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 	configureCmd(cmd)
 	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
 
-	// Run silently - we only care about exit code
+	// Capture stderr to detect password errors
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
 	err = cmd.Run()
 	if err == nil {
-		// Repository exists
+		// Repository exists and is accessible
 		return nil
 	}
 
-	// Repository doesn't exist or is inaccessible - try to initialize
+	// Determine exit code and stderr content
+	exitCode := 1
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		exitCode = exitErr.ExitCode()
+	}
+	stderr := stderrBuf.String()
+
+	// Check for password errors first - these should not be retried
+	if isPasswordError(exitCode, stderr) {
+		return fmt.Errorf("%w: %s", ErrPasswordFailed, strings.TrimSpace(stderr))
+	}
+
+	// Only try to initialize if the repository genuinely doesn't exist
+	if !isRepositoryNotFoundError(exitCode, stderr) {
+		// Some other error (network, permissions, etc.) - don't try to init
+		return fmt.Errorf("repository check failed (exit code %d): %s", exitCode, strings.TrimSpace(stderr))
+	}
+
+	// Repository doesn't exist - try to initialize
 	fmt.Fprintf(logWriter, "Repository not found, initializing...\n")
 
 	initArgs := []string{"init"}

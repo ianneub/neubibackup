@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"neubibackup/internal/config"
 	"neubibackup/internal/logging"
@@ -46,6 +47,7 @@ type Orchestrator struct {
 	notifier   Notifier
 	tailscale  TailscaleProvider
 	onProgress ProgressCallback
+	location   *time.Location
 }
 
 // OrchestratorOption is a functional option for configuring an Orchestrator.
@@ -69,6 +71,14 @@ func WithTailscale(t TailscaleProvider) OrchestratorOption {
 func WithProgressCallback(cb ProgressCallback) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.onProgress = cb
+	}
+}
+
+// WithLocation sets the timezone location for the orchestrator.
+// This is used when recording non-retryable failures to pause until midnight.
+func WithLocation(loc *time.Location) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.location = loc
 	}
 }
 
@@ -212,7 +222,19 @@ func (o *Orchestrator) handleTailscaleFailure(err error) {
 
 // handleBackupFailure handles a backup failure.
 func (o *Orchestrator) handleBackupFailure(backupErr error, logFile *os.File) {
-	o.recordFailure(backupErr)
+	// Check if this is a non-retryable error (password failure)
+	if errors.Is(backupErr, restic.ErrPasswordFailed) {
+		loc := o.location
+		if loc == nil {
+			loc = time.Local
+		}
+		o.state.RecordNonRetryableFailure(backupErr, loc)
+	} else {
+		o.state.RecordFailure(backupErr)
+	}
+	if saveErr := o.state.Save(); saveErr != nil {
+		slog.Error("Error saving state", "error", saveErr)
+	}
 
 	// Read logs for notification
 	var logs string
@@ -241,7 +263,7 @@ func (o *Orchestrator) handleBackupSuccess() {
 	}
 }
 
-// recordFailure records a failure in the app state.
+// recordFailure records a retryable failure in the app state.
 func (o *Orchestrator) recordFailure(err error) {
 	o.state.RecordFailure(err)
 	if saveErr := o.state.Save(); saveErr != nil {

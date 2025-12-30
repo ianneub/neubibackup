@@ -115,6 +115,13 @@ func (s *Scheduler) IsRunning() bool {
 	return s.running
 }
 
+// Location returns the timezone location used by the scheduler.
+func (s *Scheduler) Location() *time.Location {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.location
+}
+
 func (s *Scheduler) checkAndTrigger() {
 	s.mu.Lock()
 	if s.running {
@@ -143,6 +150,11 @@ func (s *Scheduler) checkAndTrigger() {
 // shouldRunNow checks if a backup should be triggered.
 // Must be called with mu held.
 func (s *Scheduler) shouldRunNow() bool {
+	// Check if retries are paused due to non-retryable error (e.g., password failure)
+	if s.state.IsPaused() {
+		return false
+	}
+
 	scheduleTime, err := parseTime(s.config.Schedule.Time)
 	if err != nil {
 		slog.Error("Invalid schedule time", "time", s.config.Schedule.Time, "error", err)

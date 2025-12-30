@@ -405,3 +405,98 @@ func TestUpdateConfig(t *testing.T) {
 		t.Error("UpdateConfig() should error on invalid timezone")
 	}
 }
+
+func TestShouldRunNow_WhenPaused(t *testing.T) {
+	// Configure a schedule that would normally trigger (past schedule time today)
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time: "00:01", // Very early, so we're past it
+		},
+	}
+
+	// Create state that is paused (set PausedUntil directly)
+	st := &state.State{
+		Backup: state.BackupState{
+			PausedUntil: time.Now().Add(1 * time.Hour), // Paused for 1 hour
+		},
+	}
+
+	s, err := New(cfg, st, func() {})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Lock the mutex as shouldRunNow requires it to be held
+	s.mu.Lock()
+	result := s.shouldRunNow()
+	s.mu.Unlock()
+
+	if result {
+		t.Error("shouldRunNow() should return false when state is paused")
+	}
+}
+
+func TestShouldRunNow_WhenNotPaused(t *testing.T) {
+	// Use a schedule time that's definitely in the past
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time: "00:01",
+		},
+	}
+
+	// Create state with no pause and no success today
+	st := &state.State{}
+
+	s, err := New(cfg, st, func() {})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Skip if it's right around midnight
+	now := time.Now()
+	if now.Hour() == 0 && now.Minute() <= 1 {
+		t.Skip("Skipping due to edge case near midnight")
+	}
+
+	s.mu.Lock()
+	result := s.shouldRunNow()
+	s.mu.Unlock()
+
+	if !result {
+		t.Error("shouldRunNow() should return true when not paused and past schedule time")
+	}
+}
+
+func TestShouldRunNow_PauseExpired(t *testing.T) {
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time: "00:01",
+		},
+	}
+
+	// Create state with an expired pause (in the past)
+	st := &state.State{
+		Backup: state.BackupState{
+			PausedUntil: time.Now().Add(-1 * time.Hour), // Paused until an hour ago
+		},
+	}
+
+	s, err := New(cfg, st, func() {})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Skip if it's right around midnight
+	now := time.Now()
+	if now.Hour() == 0 && now.Minute() <= 1 {
+		t.Skip("Skipping due to edge case near midnight")
+	}
+
+	s.mu.Lock()
+	result := s.shouldRunNow()
+	s.mu.Unlock()
+
+	if !result {
+		t.Error("shouldRunNow() should return true when pause has expired")
+	}
+}

@@ -455,3 +455,180 @@ func TestConcurrentAccess(t *testing.T) {
 	// If we get here without data races or panics, the mutex is working
 	t.Log("Concurrent access test completed without race conditions")
 }
+
+func TestIsPaused(t *testing.T) {
+	tests := []struct {
+		name        string
+		pausedUntil time.Time
+		want        bool
+	}{
+		{
+			name:        "zero time is not paused",
+			pausedUntil: time.Time{},
+			want:        false,
+		},
+		{
+			name:        "future time is paused",
+			pausedUntil: time.Now().Add(1 * time.Hour),
+			want:        true,
+		},
+		{
+			name:        "past time is not paused",
+			pausedUntil: time.Now().Add(-1 * time.Hour),
+			want:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &State{
+				Backup: BackupState{
+					PausedUntil: tt.pausedUntil,
+				},
+			}
+			if got := s.IsPaused(); got != tt.want {
+				t.Errorf("IsPaused() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClearPause(t *testing.T) {
+	s := &State{
+		Backup: BackupState{
+			PausedUntil: time.Now().Add(1 * time.Hour),
+		},
+	}
+
+	if !s.IsPaused() {
+		t.Fatal("IsPaused() should be true before ClearPause")
+	}
+
+	s.ClearPause()
+
+	if s.IsPaused() {
+		t.Error("IsPaused() should be false after ClearPause")
+	}
+	if !s.Backup.PausedUntil.IsZero() {
+		t.Errorf("PausedUntil should be zero, got %v", s.Backup.PausedUntil)
+	}
+}
+
+func TestClearPause_WhenNotPaused(t *testing.T) {
+	s := &State{}
+
+	// Should not panic when clearing an already-cleared pause
+	s.ClearPause()
+
+	if s.IsPaused() {
+		t.Error("IsPaused() should be false")
+	}
+}
+
+func TestRecordSuccessClearsPause(t *testing.T) {
+	s := &State{
+		Backup: BackupState{
+			PausedUntil:         time.Now().Add(1 * time.Hour),
+			ConsecutiveFailures: 5,
+		},
+	}
+
+	if !s.IsPaused() {
+		t.Fatal("IsPaused() should be true before RecordSuccess")
+	}
+
+	s.RecordSuccess()
+
+	if s.IsPaused() {
+		t.Error("IsPaused() should be false after RecordSuccess")
+	}
+	if !s.Backup.PausedUntil.IsZero() {
+		t.Errorf("PausedUntil should be zero, got %v", s.Backup.PausedUntil)
+	}
+}
+
+func TestRecordNonRetryableFailure(t *testing.T) {
+	loc := time.Local
+	s := &State{
+		Backup: BackupState{
+			ConsecutiveFailures: 2,
+		},
+	}
+
+	testErr := errors.New("password command failed")
+	before := time.Now()
+	s.RecordNonRetryableFailure(testErr, loc)
+	after := time.Now()
+
+	// Should increment consecutive failures
+	if s.Backup.ConsecutiveFailures != 3 {
+		t.Errorf("ConsecutiveFailures = %d, want 3", s.Backup.ConsecutiveFailures)
+	}
+
+	// Should record error
+	if s.Backup.LastError != testErr.Error() {
+		t.Errorf("LastError = %q, want %q", s.Backup.LastError, testErr.Error())
+	}
+
+	// Should record attempt time
+	if s.Backup.LastAttempt.Before(before) || s.Backup.LastAttempt.After(after) {
+		t.Errorf("LastAttempt = %v, should be between %v and %v", s.Backup.LastAttempt, before, after)
+	}
+
+	// Should be paused
+	if !s.IsPaused() {
+		t.Error("IsPaused() should be true after RecordNonRetryableFailure")
+	}
+
+	// Should be paused until midnight tomorrow
+	now := time.Now().In(loc)
+	expectedPause := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
+	if !s.Backup.PausedUntil.Equal(expectedPause) {
+		t.Errorf("PausedUntil = %v, want %v", s.Backup.PausedUntil, expectedPause)
+	}
+}
+
+func TestRecordNonRetryableFailure_DifferentTimezone(t *testing.T) {
+	// Test that the pause is set correctly in a different timezone
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("Failed to load timezone: %v", err)
+	}
+
+	s := &State{}
+	s.RecordNonRetryableFailure(errors.New("test error"), loc)
+
+	// Pause should be until midnight in the specified timezone
+	now := time.Now().In(loc)
+	expectedPause := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
+	if !s.Backup.PausedUntil.Equal(expectedPause) {
+		t.Errorf("PausedUntil = %v, want %v", s.Backup.PausedUntil, expectedPause)
+	}
+}
+
+func TestPausePersistence(t *testing.T) {
+	// Test that PausedUntil is persisted to and loaded from file
+	tmpDir := t.TempDir()
+	statePath := tmpDir + "/state.yaml"
+
+	pauseTime := time.Now().Add(1 * time.Hour).Truncate(time.Second)
+	s := &State{
+		Backup: BackupState{
+			PausedUntil: pauseTime,
+		},
+	}
+
+	if err := s.SaveToFile(statePath); err != nil {
+		t.Fatalf("SaveToFile() error = %v", err)
+	}
+
+	loaded, err := LoadFromFile(statePath)
+	if err != nil {
+		t.Fatalf("LoadFromFile() error = %v", err)
+	}
+
+	// Compare with truncation since YAML may lose some precision
+	if !loaded.Backup.PausedUntil.Truncate(time.Second).Equal(pauseTime) {
+		t.Errorf("Loaded PausedUntil = %v, want %v", loaded.Backup.PausedUntil, pauseTime)
+	}
+}

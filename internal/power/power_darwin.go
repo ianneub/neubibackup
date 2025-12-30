@@ -3,7 +3,7 @@
 package power
 
 import (
-	"log"
+	"log/slog"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -38,7 +38,7 @@ func (w *Watcher) pollWakeTime() {
 			}
 
 			if wt > lastWakeTime && lastWakeTime > 0 {
-				log.Println("Wake from sleep detected")
+				slog.Info("Wake from sleep detected")
 				lastWakeTime = wt
 				w.callback()
 			} else if wt > lastWakeTime {

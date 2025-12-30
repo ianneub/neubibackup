@@ -3,7 +3,7 @@
 package power
 
 import (
-	"log"
+	"log/slog"
 	"syscall"
 	"unsafe"
 )
@@ -82,7 +82,7 @@ func (w *Watcher) messageLoop() {
 	)
 
 	if hwnd == 0 {
-		log.Println("Failed to create power watcher window")
+		slog.Error("Failed to create power watcher window")
 		return
 	}
 
@@ -112,7 +112,7 @@ func (w *Watcher) messageLoop() {
 func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 	if msg == WM_POWERBROADCAST {
 		if wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND {
-			log.Println("Wake from sleep detected")
+			slog.Info("Wake from sleep detected")
 			if globalWatcher != nil && globalWatcher.callback != nil {
 				globalWatcher.callback()
 			}

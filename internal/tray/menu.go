@@ -1,7 +1,7 @@
 package tray
 
 import (
-	"log"
+	"log/slog"
 
 	"neubibackup/internal/restic"
 	"neubibackup/internal/state"
@@ -175,21 +175,21 @@ func (m *Menu) eventLoop(mOpenConfig, mOpenLogs, mOpenAppLog, mQuit *systray.Men
 // toggleAutostart handles the autostart checkbox toggle.
 func (m *Menu) toggleAutostart() {
 	if m.cfg.Autostart == nil {
-		log.Println("Autostart not available")
+		slog.Info("Autostart not available")
 		return
 	}
 
 	if err := m.cfg.Autostart.Toggle(); err != nil {
-		log.Printf("Error toggling autostart: %v", err)
+		slog.Error("Error toggling autostart", "error", err)
 		return
 	}
 
 	if m.cfg.Autostart.IsEnabled() {
 		m.mAutostart.Check()
-		log.Println("Start at Login: enabled")
+		slog.Info("Start at Login: enabled")
 	} else {
 		m.mAutostart.Uncheck()
-		log.Println("Start at Login: disabled")
+		slog.Info("Start at Login: disabled")
 	}
 }
 

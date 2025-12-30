@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 
 	"neubibackup/internal/config"
@@ -99,15 +99,15 @@ func NewOrchestrator(cfg *config.Config, appState *state.State, opts ...Orchestr
 //
 // The context can be used to cancel the backup operation.
 func (o *Orchestrator) Run(ctx context.Context) Result {
-	log.Println("Starting backup...")
+	slog.Info("Starting backup...")
 
 	// Connect Tailscale on-demand if configured
 	var proxyAddr string
 	if o.cfg.IsTailscaleEnabled() && o.tailscale != nil {
-		log.Println("Connecting to Tailscale...")
+		slog.Info("Connecting to Tailscale...")
 		addr, err := o.tailscale.Connect(ctx)
 		if err != nil {
-			log.Printf("Tailscale connection failed: %v", err)
+			slog.Error("Tailscale connection failed", "error", err)
 			o.handleTailscaleFailure(err)
 			return Result{
 				Success: false,
@@ -115,26 +115,26 @@ func (o *Orchestrator) Run(ctx context.Context) Result {
 			}
 		}
 		proxyAddr = addr
-		log.Printf("Tailscale connected, using proxy: %s", proxyAddr)
+		slog.Info("Tailscale connected", "proxy", proxyAddr)
 
 		// Disconnect Tailscale when backup completes
 		defer func() {
-			log.Println("Disconnecting from Tailscale...")
+			slog.Info("Disconnecting from Tailscale...")
 			if err := o.tailscale.Disconnect(); err != nil {
-				log.Printf("Warning: Tailscale shutdown error: %v", err)
+				slog.Warn("Tailscale shutdown error", "error", err)
 			}
 		}()
 	}
 
 	// Send start notification
 	if err := o.notifier.NotifyStart(); err != nil {
-		log.Printf("Warning: start notification failed: %v", err)
+		slog.Warn("Start notification failed", "error", err)
 	}
 
 	// Create log file
 	logFile, err := logging.CreateLogFile()
 	if err != nil {
-		log.Printf("Error creating log file: %v", err)
+		slog.Error("Error creating log file", "error", err)
 		o.recordFailure(err)
 		return Result{
 			Success: false,
@@ -154,9 +154,9 @@ func (o *Orchestrator) Run(ctx context.Context) Result {
 	if backupErr != nil {
 		// Check if backup was cancelled
 		if errors.Is(backupErr, context.Canceled) {
-			log.Println("Backup was cancelled by user")
+			slog.Info("Backup was cancelled by user")
 			if err := o.notifier.NotifyCancelled(); err != nil {
-				log.Printf("Warning: cancellation notification failed: %v", err)
+				slog.Warn("Cancellation notification failed", "error", err)
 			}
 			return Result{
 				Success:   false,
@@ -166,7 +166,7 @@ func (o *Orchestrator) Run(ctx context.Context) Result {
 			}
 		}
 
-		log.Printf("Backup failed: %v", backupErr)
+		slog.Error("Backup failed", "error", backupErr)
 		o.handleBackupFailure(backupErr, logFile)
 		return Result{
 			Success: false,
@@ -176,12 +176,12 @@ func (o *Orchestrator) Run(ctx context.Context) Result {
 	}
 
 	// Success
-	log.Println("Backup completed successfully")
+	slog.Info("Backup completed successfully")
 	o.handleBackupSuccess()
 
 	// Cleanup old logs
 	if err := logging.CleanupOldLogs(); err != nil {
-		log.Printf("Warning: log cleanup failed: %v", err)
+		slog.Warn("Log cleanup failed", "error", err)
 	}
 
 	return Result{
@@ -206,7 +206,7 @@ func (o *Orchestrator) handleTailscaleFailure(err error) {
 	o.recordFailure(err)
 
 	if notifyErr := o.notifier.NotifyFailure(errMsg, ""); notifyErr != nil {
-		log.Printf("Warning: failure notification failed: %v", notifyErr)
+		slog.Warn("Failure notification failed", "error", notifyErr)
 	}
 }
 
@@ -225,7 +225,7 @@ func (o *Orchestrator) handleBackupFailure(backupErr error, logFile *os.File) {
 	}
 
 	if err := o.notifier.NotifyFailure(backupErr.Error(), logs); err != nil {
-		log.Printf("Warning: failure notification failed: %v", err)
+		slog.Warn("Failure notification failed", "error", err)
 	}
 }
 
@@ -233,11 +233,11 @@ func (o *Orchestrator) handleBackupFailure(backupErr error, logFile *os.File) {
 func (o *Orchestrator) handleBackupSuccess() {
 	o.state.RecordSuccess()
 	if err := o.state.Save(); err != nil {
-		log.Printf("Error saving state: %v", err)
+		slog.Error("Error saving state", "error", err)
 	}
 
 	if err := o.notifier.NotifySuccess("Backup completed successfully"); err != nil {
-		log.Printf("Warning: success notification failed: %v", err)
+		slog.Warn("Success notification failed", "error", err)
 	}
 }
 
@@ -245,6 +245,6 @@ func (o *Orchestrator) handleBackupSuccess() {
 func (o *Orchestrator) recordFailure(err error) {
 	o.state.RecordFailure(err)
 	if saveErr := o.state.Save(); saveErr != nil {
-		log.Printf("Error saving state: %v", saveErr)
+		slog.Error("Error saving state", "error", saveErr)
 	}
 }

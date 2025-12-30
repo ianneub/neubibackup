@@ -4,7 +4,7 @@ package tailscale
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -44,7 +44,7 @@ func New(cfg *config.TailscaleConfig, stateDir string) (*Manager, error) {
 		AuthKey:   cfg.AuthKey,
 		Ephemeral: false, // Always non-ephemeral for stable device registration
 		Logf: func(format string, args ...any) {
-			log.Printf("[tailscale] "+format, args...)
+			slog.Debug(fmt.Sprintf(format, args...), "component", "tailscale")
 		},
 	}
 
@@ -65,7 +65,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	}
 
-	log.Println("Starting Tailscale connection...")
+	slog.Info("Starting Tailscale connection...")
 
 	// Start with timeout
 	startCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -87,7 +87,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	if len(status.TailscaleIPs) > 0 {
 		ip = status.TailscaleIPs[0].String()
 	}
-	log.Printf("Tailscale connected: %s (%s)", m.server.Hostname, ip)
+	slog.Info("Tailscale connected", "hostname", m.server.Hostname, "ip", ip)
 
 	// Start SOCKS5 proxy
 	m.proxy = NewProxy(m.server)
@@ -100,7 +100,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.proxyAddr = proxyAddr
 	m.started = true
 
-	log.Printf("Tailscale SOCKS5 proxy listening on %s", proxyAddr)
+	slog.Info("Tailscale SOCKS5 proxy listening", "address", proxyAddr)
 
 	return nil
 }
@@ -114,12 +114,12 @@ func (m *Manager) Close() error {
 		return nil
 	}
 
-	log.Println("Shutting down Tailscale...")
+	slog.Info("Shutting down Tailscale...")
 
 	// Close proxy first
 	if m.proxy != nil {
 		if err := m.proxy.Close(); err != nil {
-			log.Printf("Warning: error closing proxy: %v", err)
+			slog.Warn("Error closing proxy", "error", err)
 		}
 		m.proxy = nil
 	}

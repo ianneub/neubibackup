@@ -1,6 +1,9 @@
 package logging
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,5 +246,260 @@ func TestGetAppLogPath(t *testing.T) {
 	// Should contain neubibackup directory
 	if !strings.Contains(path, "neubibackup") {
 		t.Errorf("GetAppLogPath() = %q, should contain 'neubibackup'", path)
+	}
+}
+
+func TestReplaceAttr(t *testing.T) {
+	tests := []struct {
+		name     string
+		attr     slog.Attr
+		wantFile string
+	}{
+		{
+			name: "converts absolute path to relative",
+			attr: slog.Any(slog.SourceKey, &slog.Source{
+				File: moduleBasePath + string(filepath.Separator) + "internal" + string(filepath.Separator) + "backup" + string(filepath.Separator) + "orchestrator.go",
+				Line: 42,
+			}),
+			wantFile: "internal" + string(filepath.Separator) + "backup" + string(filepath.Separator) + "orchestrator.go",
+		},
+		{
+			name: "leaves non-module paths unchanged",
+			attr: slog.Any(slog.SourceKey, &slog.Source{
+				File: "/some/other/path/file.go",
+				Line: 10,
+			}),
+			wantFile: "/some/other/path/file.go",
+		},
+		{
+			name: "handles non-source attributes",
+			attr: slog.String("message", "test message"),
+			wantFile: "", // Not a source attr, so no file to check
+		},
+		{
+			name: "handles nil source",
+			attr: slog.Any(slog.SourceKey, (*slog.Source)(nil)),
+			wantFile: "", // nil source
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := replaceAttr(nil, tt.attr)
+
+			if tt.attr.Key != slog.SourceKey {
+				// Non-source attributes should be unchanged
+				if result.Key != tt.attr.Key {
+					t.Errorf("replaceAttr() changed non-source attr key")
+				}
+				return
+			}
+
+			source, ok := result.Value.Any().(*slog.Source)
+			if !ok || source == nil {
+				if tt.wantFile != "" {
+					t.Errorf("replaceAttr() returned nil source, want file %q", tt.wantFile)
+				}
+				return
+			}
+
+			if source.File != tt.wantFile {
+				t.Errorf("replaceAttr() file = %q, want %q", source.File, tt.wantFile)
+			}
+		})
+	}
+}
+
+func TestSplitHandler_LevelRouting(t *testing.T) {
+	var fileBuf, stdoutBuf, stderrBuf bytes.Buffer
+
+	// Use Debug level so all messages are logged
+	handlerOpts := &slog.HandlerOptions{
+		AddSource: false, // Disable source for simpler output
+		Level:     slog.LevelDebug,
+	}
+
+	handler := &splitHandler{
+		fileHandler:   slog.NewTextHandler(&fileBuf, handlerOpts),
+		stdoutHandler: slog.NewTextHandler(&stdoutBuf, handlerOpts),
+		stderrHandler: slog.NewTextHandler(&stderrBuf, handlerOpts),
+	}
+
+	logger := slog.New(handler)
+	ctx := context.Background()
+
+	tests := []struct {
+		name         string
+		logFunc      func()
+		wantInFile   bool
+		wantInStdout bool
+		wantInStderr bool
+		message      string
+	}{
+		{
+			name:         "Debug goes to file and stdout",
+			logFunc:      func() { logger.Debug("debug message") },
+			wantInFile:   true,
+			wantInStdout: true,
+			wantInStderr: false,
+			message:      "debug message",
+		},
+		{
+			name:         "Info goes to file and stdout",
+			logFunc:      func() { logger.InfoContext(ctx, "info message") },
+			wantInFile:   true,
+			wantInStdout: true,
+			wantInStderr: false,
+			message:      "info message",
+		},
+		{
+			name:         "Warn goes to file and stdout",
+			logFunc:      func() { logger.Warn("warn message") },
+			wantInFile:   true,
+			wantInStdout: true,
+			wantInStderr: false,
+			message:      "warn message",
+		},
+		{
+			name:         "Error goes to file and stderr",
+			logFunc:      func() { logger.Error("error message") },
+			wantInFile:   true,
+			wantInStdout: false,
+			wantInStderr: true,
+			message:      "error message",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear buffers
+			fileBuf.Reset()
+			stdoutBuf.Reset()
+			stderrBuf.Reset()
+
+			tt.logFunc()
+
+			fileContent := fileBuf.String()
+			stdoutContent := stdoutBuf.String()
+			stderrContent := stderrBuf.String()
+
+			if tt.wantInFile && !strings.Contains(fileContent, tt.message) {
+				t.Errorf("file buffer should contain %q, got %q", tt.message, fileContent)
+			}
+			if !tt.wantInFile && strings.Contains(fileContent, tt.message) {
+				t.Errorf("file buffer should NOT contain %q, got %q", tt.message, fileContent)
+			}
+
+			if tt.wantInStdout && !strings.Contains(stdoutContent, tt.message) {
+				t.Errorf("stdout buffer should contain %q, got %q", tt.message, stdoutContent)
+			}
+			if !tt.wantInStdout && strings.Contains(stdoutContent, tt.message) {
+				t.Errorf("stdout buffer should NOT contain %q, got %q", tt.message, stdoutContent)
+			}
+
+			if tt.wantInStderr && !strings.Contains(stderrContent, tt.message) {
+				t.Errorf("stderr buffer should contain %q, got %q", tt.message, stderrContent)
+			}
+			if !tt.wantInStderr && strings.Contains(stderrContent, tt.message) {
+				t.Errorf("stderr buffer should NOT contain %q, got %q", tt.message, stderrContent)
+			}
+		})
+	}
+}
+
+func TestSplitHandler_WithAttrs(t *testing.T) {
+	var buf bytes.Buffer
+	handlerOpts := &slog.HandlerOptions{AddSource: false}
+
+	handler := &splitHandler{
+		fileHandler:   slog.NewTextHandler(&buf, handlerOpts),
+		stdoutHandler: slog.NewTextHandler(&bytes.Buffer{}, handlerOpts),
+		stderrHandler: slog.NewTextHandler(&bytes.Buffer{}, handlerOpts),
+	}
+
+	// Add attributes
+	newHandler := handler.WithAttrs([]slog.Attr{slog.String("service", "test")})
+	logger := slog.New(newHandler)
+
+	logger.Info("test message")
+
+	content := buf.String()
+	if !strings.Contains(content, "service=test") {
+		t.Errorf("WithAttrs() attributes not propagated, got %q", content)
+	}
+}
+
+func TestSplitHandler_WithGroup(t *testing.T) {
+	var buf bytes.Buffer
+	handlerOpts := &slog.HandlerOptions{AddSource: false}
+
+	handler := &splitHandler{
+		fileHandler:   slog.NewTextHandler(&buf, handlerOpts),
+		stdoutHandler: slog.NewTextHandler(&bytes.Buffer{}, handlerOpts),
+		stderrHandler: slog.NewTextHandler(&bytes.Buffer{}, handlerOpts),
+	}
+
+	// Add group
+	newHandler := handler.WithGroup("mygroup")
+	logger := slog.New(newHandler)
+
+	logger.Info("test message", "key", "value")
+
+	content := buf.String()
+	if !strings.Contains(content, "mygroup.key=value") {
+		t.Errorf("WithGroup() not applied, got %q", content)
+	}
+}
+
+func TestSplitHandler_Enabled(t *testing.T) {
+	var buf bytes.Buffer
+
+	// Create handler with default level (Info)
+	handlerOpts := &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}
+
+	handler := &splitHandler{
+		fileHandler:   slog.NewTextHandler(&buf, handlerOpts),
+		stdoutHandler: slog.NewTextHandler(&bytes.Buffer{}, handlerOpts),
+		stderrHandler: slog.NewTextHandler(&bytes.Buffer{}, handlerOpts),
+	}
+
+	ctx := context.Background()
+
+	tests := []struct {
+		level   slog.Level
+		enabled bool
+	}{
+		{slog.LevelDebug, false},
+		{slog.LevelInfo, true},
+		{slog.LevelWarn, true},
+		{slog.LevelError, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.level.String(), func(t *testing.T) {
+			got := handler.Enabled(ctx, tt.level)
+			if got != tt.enabled {
+				t.Errorf("Enabled(%s) = %v, want %v", tt.level, got, tt.enabled)
+			}
+		})
+	}
+}
+
+func TestModuleBasePath(t *testing.T) {
+	// moduleBasePath should be set during init
+	if moduleBasePath == "" {
+		t.Error("moduleBasePath should be set during init")
+	}
+
+	// Should be an absolute path
+	if !filepath.IsAbs(moduleBasePath) {
+		t.Errorf("moduleBasePath = %q, should be absolute", moduleBasePath)
+	}
+
+	// Should exist
+	if _, err := os.Stat(moduleBasePath); err != nil {
+		t.Errorf("moduleBasePath = %q does not exist: %v", moduleBasePath, err)
 	}
 }

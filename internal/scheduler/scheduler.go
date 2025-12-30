@@ -4,7 +4,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -83,7 +83,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 // OnWake should be called when the system wakes from sleep.
 // It checks if a backup was missed and triggers one if needed.
 func (s *Scheduler) OnWake() {
-	log.Println("System wake detected, checking for missed backup...")
+	slog.Info("System wake detected, checking for missed backup...")
 	s.checkAndTrigger()
 }
 
@@ -92,7 +92,7 @@ func (s *Scheduler) TriggerNow() {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
-		log.Println("Backup already running, skipping manual trigger")
+		slog.Info("Backup already running, skipping manual trigger")
 		return
 	}
 	s.running = true
@@ -145,7 +145,7 @@ func (s *Scheduler) checkAndTrigger() {
 func (s *Scheduler) shouldRunNow() bool {
 	scheduleTime, err := parseTime(s.config.Schedule.Time)
 	if err != nil {
-		log.Printf("Invalid schedule time %q: %v", s.config.Schedule.Time, err)
+		slog.Error("Invalid schedule time", "time", s.config.Schedule.Time, "error", err)
 		return false
 	}
 

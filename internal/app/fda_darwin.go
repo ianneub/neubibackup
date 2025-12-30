@@ -3,7 +3,7 @@
 package app
 
 import (
-	"log"
+	"log/slog"
 
 	"neubibackup/internal/config"
 )
@@ -11,12 +11,12 @@ import (
 // handleMacOSFirstRun prompts for Full Disk Access if not already granted.
 func (a *App) handleMacOSFirstRun() {
 	if config.HasFullDiskAccess() {
-		log.Println("Full Disk Access already granted")
+		slog.Info("Full Disk Access already granted")
 		return
 	}
 
-	log.Println("Full Disk Access not granted - opening System Settings...")
+	slog.Info("Full Disk Access not granted - opening System Settings...")
 	if err := config.OpenFullDiskAccessSettings(); err != nil {
-		log.Printf("Warning: could not open Full Disk Access settings: %v", err)
+		slog.Warn("Could not open Full Disk Access settings", "error", err)
 	}
 }

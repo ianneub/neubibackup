@@ -4,7 +4,7 @@ package updater
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"runtime"
 
 	"github.com/Masterminds/semver/v3"
@@ -32,7 +32,7 @@ func New(currentVersion, repoOwner, repoName string) *Updater {
 func (u *Updater) CheckForUpdate(ctx context.Context) (newVersion string, available bool, err error) {
 	// Skip update check if current version is not a valid semver (e.g., "dev")
 	if !isValidSemver(u.currentVersion) {
-		log.Printf("Skipping update check: current version %q is not a valid semver", u.currentVersion)
+		slog.Info("Skipping update check: current version is not a valid semver", "version", u.currentVersion)
 		return "", false, nil
 	}
 
@@ -99,7 +99,7 @@ func (u *Updater) DownloadAndApply(ctx context.Context) error {
 		return fmt.Errorf("already up to date")
 	}
 
-	log.Printf("Updating from %s to %s", u.currentVersion, latest.Version())
+	slog.Info("Updating", "from", u.currentVersion, "to", latest.Version())
 
 	// Get the executable path
 	exe, err := selfupdate.ExecutablePath()
@@ -110,7 +110,7 @@ func (u *Updater) DownloadAndApply(ctx context.Context) error {
 	// On macOS, we need to update the .app bundle, not just the binary
 	// go-selfupdate handles this when the asset is a ZIP containing the .app
 	if runtime.GOOS == "darwin" {
-		log.Printf("Updating macOS app bundle at: %s", exe)
+		slog.Info("Updating macOS app bundle", "path", exe)
 	}
 
 	// Download and apply the update
@@ -118,7 +118,7 @@ func (u *Updater) DownloadAndApply(ctx context.Context) error {
 		return fmt.Errorf("applying update: %w", err)
 	}
 
-	log.Printf("Update to %s completed successfully", latest.Version())
+	slog.Info("Update completed successfully", "version", latest.Version())
 	return nil
 }
 

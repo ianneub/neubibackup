@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -83,7 +83,7 @@ func (p *Proxy) acceptLoop() {
 			if closed {
 				return
 			}
-			log.Printf("[tailscale-proxy] accept error: %v", err)
+			slog.Error("Tailscale proxy accept error", "error", err)
 			continue
 		}
 
@@ -204,7 +204,7 @@ func (p *Proxy) handleConnection(conn net.Conn) {
 
 	targetConn, err := p.server.Dial(ctx, "tcp", addr)
 	if err != nil {
-		log.Printf("[tailscale-proxy] dial %s failed: %v", addr, err)
+		slog.Error("Tailscale proxy dial failed", "address", addr, "error", err)
 		p.sendReply(conn, 0x04) // Host unreachable
 		return
 	}

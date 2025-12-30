@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"os"
 
 	"neubibackup/internal/app"
@@ -26,10 +26,11 @@ func main() {
 	instanceLock, err = singleinstance.Acquire()
 	if err != nil {
 		if errors.Is(err, singleinstance.ErrAlreadyRunning) {
-			log.Println("Another instance of NeubiBackup is already running. Exiting.")
+			slog.Info("Another instance of NeubiBackup is already running. Exiting.")
 			os.Exit(0)
 		}
-		log.Fatalf("Failed to acquire instance lock: %v", err)
+		slog.Error("Failed to acquire instance lock", "error", err)
+		os.Exit(1)
 	}
 
 	systray.Run(onReady, onExit)
@@ -43,11 +44,13 @@ func onReady() {
 	)
 
 	if err := application.Initialize(); err != nil {
-		log.Fatalf("Failed to initialize: %v", err)
+		slog.Error("Failed to initialize", "error", err)
+		os.Exit(1)
 	}
 
 	if err := application.Run(); err != nil {
-		log.Fatalf("Failed to run: %v", err)
+		slog.Error("Failed to run", "error", err)
+		os.Exit(1)
 	}
 }
 

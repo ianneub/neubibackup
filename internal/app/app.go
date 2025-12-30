@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -117,7 +117,7 @@ func (a *App) Initialize() error {
 		a.cleanupAppLog = cleanup
 	}
 
-	log.Printf("NeubiBackup starting, version %s", a.version)
+	slog.Info("NeubiBackup starting", "version", a.version)
 
 	// Platform-specific cleanup
 	cleanupOldUpdates()
@@ -126,13 +126,13 @@ func (a *App) Initialize() error {
 	// Initialize autostart manager
 	a.autostartMgr, err = autostart.New()
 	if err != nil {
-		log.Printf("Warning: could not initialize autostart: %v", err)
+		slog.Warn("Could not initialize autostart", "error", err)
 	}
 
 	// Load state early (needed for macOS FDA check)
 	a.state, err = state.Load()
 	if err != nil {
-		log.Printf("ERROR loading state (backup history may be lost): %v", err)
+		slog.Error("Loading state failed (backup history may be lost)", "error", err)
 		a.state = &state.State{}
 	}
 
@@ -142,19 +142,19 @@ func (a *App) Initialize() error {
 	// Check for first run
 	exists, err := config.ConfigExists()
 	if err != nil {
-		log.Printf("Error checking config: %v", err)
+		slog.Error("Error checking config", "error", err)
 	}
 
 	if !exists {
 		// First run: create config and open in editor
 		if err := a.handleFirstRun(); err != nil {
-			log.Printf("Error during first run setup: %v", err)
+			slog.Error("Error during first run setup", "error", err)
 		}
 	} else {
 		// Load existing config
 		a.cfg, err = config.Load()
 		if err != nil {
-			log.Printf("Error loading config: %v", err)
+			slog.Error("Error loading config", "error", err)
 		}
 	}
 
@@ -244,7 +244,7 @@ func (a *App) Run() error {
 
 // Shutdown cleans up all resources. Call this from systray's onExit callback.
 func (a *App) Shutdown() {
-	log.Println("NeubiBackup exiting...")
+	slog.Info("NeubiBackup exiting...")
 
 	// Cancel app context
 	if a.cancel != nil {
@@ -282,7 +282,7 @@ func (a *App) Shutdown() {
 
 // handleFirstRun creates the config file and opens it in the editor.
 func (a *App) handleFirstRun() error {
-	log.Println("First run detected, creating config file...")
+	slog.Info("First run detected, creating config file...")
 
 	// Create config directory and default config
 	if err := config.WriteDefaultConfig(); err != nil {
@@ -295,9 +295,9 @@ func (a *App) handleFirstRun() error {
 		return err
 	}
 
-	log.Printf("Opening config file: %s", configPath)
+	slog.Info("Opening config file", "path", configPath)
 	if err := config.OpenInEditor(configPath); err != nil {
-		log.Printf("Warning: could not open config in editor: %v", err)
+		slog.Warn("Could not open config in editor", "error", err)
 	}
 
 	// Load the new (unconfigured) config
@@ -314,33 +314,33 @@ func (a *App) handleFirstRun() error {
 func (a *App) openConfig() {
 	configPath, err := config.GetConfigPath()
 	if err != nil {
-		log.Printf("Error getting config path: %v", err)
+		slog.Error("Error getting config path", "error", err)
 		return
 	}
 	if err := config.OpenInEditor(configPath); err != nil {
-		log.Printf("Error opening config: %v", err)
+		slog.Error("Error opening config", "error", err)
 	}
 }
 
 func (a *App) openLogs() {
 	logsDir, err := config.GetLogsDir()
 	if err != nil {
-		log.Printf("Error getting logs dir: %v", err)
+		slog.Error("Error getting logs dir", "error", err)
 		return
 	}
 	if err := config.OpenFolder(logsDir); err != nil {
-		log.Printf("Error opening logs folder: %v", err)
+		slog.Error("Error opening logs folder", "error", err)
 	}
 }
 
 func (a *App) openAppLog() {
 	appLogPath, err := logging.GetAppLogPath()
 	if err != nil {
-		log.Printf("Error getting app log path: %v", err)
+		slog.Error("Error getting app log path", "error", err)
 		return
 	}
 	if err := config.OpenInEditor(appLogPath); err != nil {
-		log.Printf("Error opening app log: %v", err)
+		slog.Error("Error opening app log", "error", err)
 	}
 }
 
@@ -352,12 +352,12 @@ func (a *App) initScheduler() {
 	var err error
 	a.sched, err = scheduler.New(a.cfg, a.state, a.runBackup)
 	if err != nil {
-		log.Printf("Error creating scheduler: %v", err)
+		slog.Error("Error creating scheduler", "error", err)
 		return
 	}
 
 	go a.sched.Start(a.ctx)
-	log.Println("Scheduler started")
+	slog.Info("Scheduler started")
 }
 
 func (a *App) onSystemWake() {
@@ -369,7 +369,7 @@ func (a *App) onSystemWake() {
 // TriggerBackup starts a backup if one is not already running.
 func (a *App) TriggerBackup() {
 	if a.backupState.IsRunning() {
-		log.Println("Backup already running")
+		slog.Info("Backup already running")
 		return
 	}
 
@@ -379,18 +379,18 @@ func (a *App) TriggerBackup() {
 // StopBackup cancels the currently running backup.
 func (a *App) StopBackup() {
 	if !a.backupState.IsRunning() {
-		log.Println("No backup running")
+		slog.Info("No backup running")
 		return
 	}
 
-	log.Println("Stopping backup...")
+	slog.Info("Stopping backup...")
 	a.backupState.StopBackup()
 }
 
 func (a *App) runBackup() {
 	ctx, err := a.backupState.StartBackup(a.ctx)
 	if err != nil {
-		log.Println("Backup already running")
+		slog.Info("Backup already running")
 		return
 	}
 
@@ -419,7 +419,7 @@ func (a *App) runBackup() {
 	if a.cfg.IsTailscaleEnabled() {
 		tsDir, err := config.GetTailscaleDir()
 		if err != nil {
-			log.Printf("Failed to get Tailscale directory: %v", err)
+			slog.Error("Failed to get Tailscale directory", "error", err)
 		} else {
 			tailscaleProvider = backup.NewTailscaleAdapter(&a.cfg.Tailscale, tsDir)
 		}
@@ -447,12 +447,12 @@ func (a *App) runBackup() {
 	result := orchestrator.Run(ctx)
 
 	if result.Cancelled {
-		log.Println("Backup was cancelled by user")
+		slog.Info("Backup was cancelled by user")
 		return
 	}
 
 	if !result.Success {
-		log.Printf("Backup failed: %v", result.Error)
+		slog.Error("Backup failed", "error", result.Error)
 	}
 }
 
@@ -475,18 +475,18 @@ func (a *App) updateIcon() {
 func (a *App) watchConfigFile() {
 	configPath, err := config.GetConfigPath()
 	if err != nil {
-		log.Printf("Error getting config path for watcher: %v", err)
+		slog.Error("Error getting config path for watcher", "error", err)
 		return
 	}
 
 	a.configWatcher, err = fsnotify.NewWatcher()
 	if err != nil {
-		log.Printf("Error creating config watcher: %v", err)
+		slog.Error("Error creating config watcher", "error", err)
 		return
 	}
 
 	if err := a.configWatcher.Add(configPath); err != nil {
-		log.Printf("Error watching config file: %v", err)
+		slog.Error("Error watching config file", "error", err)
 		return
 	}
 
@@ -499,14 +499,14 @@ func (a *App) watchConfigFile() {
 				return
 			}
 			if event.Op&fsnotify.Write == fsnotify.Write {
-				log.Println("Config file changed, reloading...")
+				slog.Info("Config file changed, reloading...")
 				a.ReloadConfig()
 			}
 		case err, ok := <-a.configWatcher.Errors:
 			if !ok {
 				return
 			}
-			log.Printf("Config watcher error: %v", err)
+			slog.Error("Config watcher error", "error", err)
 		}
 	}
 }
@@ -515,13 +515,13 @@ func (a *App) watchConfigFile() {
 func (a *App) ReloadConfig() {
 	// Stop any running backup before reloading config
 	if a.backupState.IsRunning() {
-		log.Println("Stopping running backup due to config change...")
+		slog.Info("Stopping running backup due to config change...")
 		a.backupState.StopBackup()
 	}
 
 	newCfg, err := config.Load()
 	if err != nil {
-		log.Printf("Error reloading config: %v", err)
+		slog.Error("Error reloading config", "error", err)
 		return
 	}
 
@@ -530,7 +530,7 @@ func (a *App) ReloadConfig() {
 	// Update scheduler if it exists
 	if a.sched != nil {
 		if err := a.sched.UpdateConfig(a.cfg); err != nil {
-			log.Printf("Error updating scheduler config: %v", err)
+			slog.Error("Error updating scheduler config", "error", err)
 		}
 	} else if a.cfg.IsConfigured() {
 		// Start scheduler if config is now valid
@@ -543,7 +543,7 @@ func (a *App) ReloadConfig() {
 		a.menu.RefreshOnConfigChange()
 	}
 
-	log.Println("Config reloaded successfully")
+	slog.Info("Config reloaded successfully")
 }
 
 // IsBackupRunning returns whether a backup is currently running.
@@ -575,9 +575,9 @@ func cleanupOldUpdates() {
 	for _, old := range matches {
 		if err := os.Remove(old); err != nil {
 			// File might still be locked, that's OK - we'll try again next time
-			log.Printf("Could not remove old update file %s: %v", old, err)
+			slog.Warn("Could not remove old update file", "file", old, "error", err)
 		} else {
-			log.Printf("Removed old update file: %s", old)
+			slog.Info("Removed old update file", "file", old)
 		}
 	}
 }
@@ -601,9 +601,9 @@ func cleanupOldAutostartShortcut() {
 
 	if _, err := os.Stat(shortcutPath); err == nil {
 		if err := os.Remove(shortcutPath); err != nil {
-			log.Printf("Warning: could not remove old autostart shortcut: %v", err)
+			slog.Warn("Could not remove old autostart shortcut", "error", err)
 		} else {
-			log.Println("Removed old autostart shortcut from Startup folder")
+			slog.Info("Removed old autostart shortcut from Startup folder")
 		}
 	}
 }

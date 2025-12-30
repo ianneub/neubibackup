@@ -3,7 +3,7 @@ package updater
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -64,7 +64,7 @@ func NewUpdateOrchestrator(
 // CheckIfNeeded checks for updates if not checked recently (within 24 hours).
 func (o *UpdateOrchestrator) CheckIfNeeded(ctx context.Context) {
 	if time.Since(o.state.GetLastUpdateCheck()) < 24*time.Hour {
-		log.Println("Skipping update check - checked recently")
+		slog.Info("Skipping update check - checked recently")
 		return
 	}
 	o.Check(ctx)
@@ -86,18 +86,18 @@ func (o *UpdateOrchestrator) ManualCheck(ctx context.Context) {
 
 // Check checks for available updates and triggers auto-update if found.
 func (o *UpdateOrchestrator) Check(ctx context.Context) {
-	log.Println("Checking for updates...")
+	slog.Info("Checking for updates...")
 
 	newVersion, available, err := o.updater.CheckForUpdate(ctx)
 	if err != nil {
-		log.Printf("Update check failed: %v", err)
+		slog.Error("Update check failed", "error", err)
 		return
 	}
 
 	// Record the check time
 	o.state.SetLastUpdateCheck(time.Now())
 	if err := o.state.Save(); err != nil {
-		log.Printf("Error saving state: %v", err)
+		slog.Error("Error saving state", "error", err)
 	}
 
 	if available {
@@ -105,12 +105,12 @@ func (o *UpdateOrchestrator) Check(ctx context.Context) {
 		if o.menuUpdater != nil {
 			o.menuUpdater.SetUpdateStatus(fmt.Sprintf("Update Available (%s)", newVersion), true)
 		}
-		log.Printf("Update available: %s", newVersion)
+		slog.Info("Update available", "version", newVersion)
 
 		// Trigger automatic update in background
 		go o.AttemptAutoUpdate(ctx, newVersion)
 	} else {
-		log.Println("No update available")
+		slog.Info("No update available")
 	}
 }
 
@@ -118,7 +118,7 @@ func (o *UpdateOrchestrator) Check(ctx context.Context) {
 // It waits for any running backup to complete before applying.
 func (o *UpdateOrchestrator) AttemptAutoUpdate(ctx context.Context, version string) {
 	if !o.updateState.TryStartUpdate() {
-		log.Println("Auto-update: already in progress, skipping")
+		slog.Info("Auto-update: already in progress, skipping")
 		return
 	}
 
@@ -134,11 +134,11 @@ func (o *UpdateOrchestrator) AttemptAutoUpdate(ctx context.Context, version stri
 		}
 
 		if time.Since(waitStart) > maxWait {
-			log.Println("Auto-update: gave up waiting for backup to complete")
+			slog.Info("Auto-update: gave up waiting for backup to complete")
 			return
 		}
 
-		log.Println("Auto-update: waiting for backup to complete...")
+		slog.Info("Auto-update: waiting for backup to complete...")
 		select {
 		case <-ctx.Done():
 			return
@@ -155,13 +155,13 @@ func (o *UpdateOrchestrator) AttemptAutoUpdate(ctx context.Context, version stri
 	}
 
 	// Apply the update
-	log.Printf("Auto-update: applying update to %s...", version)
+	slog.Info("Auto-update: applying update", "version", version)
 	if o.menuUpdater != nil {
 		o.menuUpdater.SetUpdateStatus("Updating...", false)
 	}
 
 	if err := o.updater.DownloadAndApply(ctx); err != nil {
-		log.Printf("Auto-update failed: %v", err)
+		slog.Error("Auto-update failed", "error", err)
 		if o.menuUpdater != nil {
 			o.menuUpdater.SetUpdateStatus(fmt.Sprintf("Update failed (%s)", version), true)
 		}
@@ -169,23 +169,23 @@ func (o *UpdateOrchestrator) AttemptAutoUpdate(ctx context.Context, version stri
 		// Record error in state
 		o.state.SetLastUpdateError(err.Error(), time.Now())
 		if saveErr := o.state.Save(); saveErr != nil {
-			log.Printf("Error saving state: %v", saveErr)
+			slog.Error("Error saving state", "error", saveErr)
 		}
 		return
 	}
 
 	// Update succeeded
-	log.Printf("Auto-update: successfully updated to %s, restarting...", version)
+	slog.Info("Auto-update: successfully updated, restarting...", "version", version)
 
 	// Record successful update
 	o.state.SetLastUpdateSuccess(version, time.Now())
 	if err := o.state.Save(); err != nil {
-		log.Printf("Error saving state: %v", err)
+		slog.Error("Error saving state", "error", err)
 	}
 
 	// Restart the application
 	if err := Restart(); err != nil {
-		log.Printf("Auto-update: restart failed: %v", err)
+		slog.Error("Auto-update: restart failed", "error", err)
 		if o.menuUpdater != nil {
 			o.menuUpdater.SetUpdateStatus("Updated - please restart manually", true)
 		}
@@ -196,7 +196,7 @@ func (o *UpdateOrchestrator) AttemptAutoUpdate(ctx context.Context, version stri
 func (o *UpdateOrchestrator) Install(ctx context.Context) {
 	// Prevent update during backup
 	if o.backupChecker.IsRunning() {
-		log.Println("Cannot update while backup is running")
+		slog.Info("Cannot update while backup is running")
 		if o.menuUpdater != nil {
 			o.menuUpdater.SetUpdateStatus("Update blocked - backup running", true)
 		}
@@ -209,10 +209,10 @@ func (o *UpdateOrchestrator) Install(ctx context.Context) {
 		o.menuUpdater.SetUpdateStatus("Downloading update...", false)
 	}
 
-	log.Printf("Installing update to %s...", availableVersion)
+	slog.Info("Installing update", "version", availableVersion)
 
 	if err := o.updater.DownloadAndApply(ctx); err != nil {
-		log.Printf("Update failed: %v", err)
+		slog.Error("Update failed", "error", err)
 		if o.menuUpdater != nil {
 			o.menuUpdater.SetUpdateStatus("Update failed - click to retry", true)
 		}
@@ -220,7 +220,7 @@ func (o *UpdateOrchestrator) Install(ctx context.Context) {
 	}
 
 	// Update succeeded
-	log.Println("Update installed successfully, restarting...")
+	slog.Info("Update installed successfully, restarting...")
 	if o.menuUpdater != nil {
 		o.menuUpdater.SetUpdateStatus("Update installed - restarting...", false)
 	}
@@ -228,12 +228,12 @@ func (o *UpdateOrchestrator) Install(ctx context.Context) {
 	// Record successful update
 	o.state.SetLastUpdateSuccess(availableVersion, time.Now())
 	if err := o.state.Save(); err != nil {
-		log.Printf("Error saving state: %v", err)
+		slog.Error("Error saving state", "error", err)
 	}
 
 	// Restart the application
 	if err := Restart(); err != nil {
-		log.Printf("Restart failed: %v", err)
+		slog.Error("Restart failed", "error", err)
 		if o.menuUpdater != nil {
 			o.menuUpdater.SetUpdateStatus("Updated - please restart manually", true)
 		}

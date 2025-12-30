@@ -3,7 +3,7 @@ package state
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -64,8 +64,9 @@ func LoadFromFile(path string) (*State, error) {
 		return nil, fmt.Errorf("parsing state file: %w", err)
 	}
 
-	log.Printf("State loaded: backup.last_success=%v, backup.consecutive_failures=%d",
-		s.Backup.LastSuccess, s.Backup.ConsecutiveFailures)
+	slog.Info("State loaded",
+		"backup.last_success", s.Backup.LastSuccess,
+		"backup.consecutive_failures", s.Backup.ConsecutiveFailures)
 
 	return &s, nil
 }
@@ -78,8 +79,8 @@ func (s *State) Save() error {
 	// Warn if we're about to save state with zero LastSuccess but non-zero LastAttempt
 	// This could indicate a bug where state was not properly loaded
 	if s.Backup.LastSuccess.IsZero() && !s.Backup.LastAttempt.IsZero() {
-		log.Printf("WARNING: Saving state with zero LastSuccess but LastAttempt=%v - this may indicate a state loading issue",
-			s.Backup.LastAttempt)
+		slog.Warn("Saving state with zero LastSuccess - this may indicate a state loading issue",
+			"last_attempt", s.Backup.LastAttempt)
 	}
 
 	statePath, err := config.GetStatePath()

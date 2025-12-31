@@ -320,34 +320,6 @@ func TestProgressWriter_NilCallback(t *testing.T) {
 	}
 }
 
-func TestFormatBytes(t *testing.T) {
-	tests := []struct {
-		name  string
-		bytes int64
-		want  string
-	}{
-		{"zero bytes", 0, "0 B"},
-		{"500 bytes", 500, "500 B"},
-		{"1023 bytes", 1023, "1023 B"},
-		{"1 KB", 1024, "1.0 KB"},
-		{"1.5 KB", 1536, "1.5 KB"},
-		{"1 MB", 1024 * 1024, "1.0 MB"},
-		{"500 MB", 500 * 1024 * 1024, "500.0 MB"},
-		{"1 GB", 1024 * 1024 * 1024, "1.0 GB"},
-		{"2.5 GB", int64(2.5 * 1024 * 1024 * 1024), "2.5 GB"},
-		{"1 TB", 1024 * 1024 * 1024 * 1024, "1.0 TB"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := formatBytes(tt.bytes)
-			if got != tt.want {
-				t.Errorf("formatBytes(%d) = %q, want %q", tt.bytes, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestBackupStatus_UnmarshalJSON(t *testing.T) {
 	jsonStr := `{"message_type":"status","percent_done":0.75,"total_files":2000,"files_done":1500,"total_bytes":10000000000,"bytes_done":7500000000,"seconds_elapsed":300,"seconds_remaining":100,"current_files":["/home/user/file1.txt","/home/user/file2.txt"]}`
 

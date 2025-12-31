@@ -7,6 +7,7 @@ import (
 
 	"neubibackup/internal/restic"
 	"neubibackup/internal/state"
+	"neubibackup/internal/util"
 )
 
 // FormatStatus returns a human-readable status string.
@@ -23,7 +24,7 @@ func FormatStatus(st *state.State, isRunning bool) string {
 	}
 
 	age := time.Since(st.Backup.LastSuccess)
-	return fmt.Sprintf("Last backup: %s", formatDuration(age))
+	return fmt.Sprintf("Last backup: %s", util.FormatDuration(age))
 }
 
 // FormatStatusDetailed returns a detailed status with error info if present.
@@ -39,32 +40,6 @@ func FormatStatusDetailed(st *state.State, isRunning bool) string {
 	return FormatStatus(st, isRunning)
 }
 
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return "just now"
-	}
-	if d < time.Hour {
-		mins := int(d.Minutes())
-		if mins == 1 {
-			return "1 minute ago"
-		}
-		return fmt.Sprintf("%d minutes ago", mins)
-	}
-	if d < 24*time.Hour {
-		hours := int(d.Hours())
-		if hours == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", hours)
-	}
-
-	days := int(d.Hours() / 24)
-	if days == 1 {
-		return "1 day ago"
-	}
-	return fmt.Sprintf("%d days ago", days)
-}
-
 // FormatProgress returns a human-readable progress string for the status menu.
 // Shows percentage and bytes processed (e.g., "Backup: 45% (2.3 GB / 5.1 GB)").
 func FormatProgress(p *restic.BackupProgress) string {
@@ -78,8 +53,8 @@ func FormatProgress(p *restic.BackupProgress) string {
 	if p.TotalBytes > 0 && p.PercentDone > 0 {
 		return fmt.Sprintf("Backup: %d%% (%s / %s)",
 			pct,
-			formatBytes(p.BytesProcessed),
-			formatBytes(p.TotalBytes))
+			util.FormatBytes(p.BytesProcessed),
+			util.FormatBytes(p.TotalBytes))
 	}
 
 	// File count progress if bytes not available
@@ -96,20 +71,6 @@ func FormatProgress(p *restic.BackupProgress) string {
 
 	// Scanning phase (no percentage yet)
 	return "Backup: Scanning files..."
-}
-
-// formatBytes converts bytes to a human-readable string.
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // FormatNextBackup returns a human-readable string for the next backup time.

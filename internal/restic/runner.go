@@ -291,27 +291,6 @@ func sanitizeArgsForLogging(args []string) []string {
 	return result
 }
 
-// RunCommand runs an arbitrary restic command (for testing, init, etc).
-// If proxyAddr is non-empty, HTTP_PROXY and HTTPS_PROXY will be set.
-func RunCommand(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string, command string, extraArgs ...string) error {
-	binaryPath, err := GetBinaryPath()
-	if err != nil {
-		return fmt.Errorf("get restic binary: %w", err)
-	}
-
-	args := []string{command}
-	args = append(args, buildRepoArgs(cfg)...)
-	args = append(args, extraArgs...)
-
-	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	configureCmd(cmd)
-	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
-	cmd.Stdout = logWriter
-	cmd.Stderr = logWriter
-
-	return cmd.Run()
-}
-
 // ensureRepositoryExists checks if the repository exists and initializes it if not.
 // Returns ErrPasswordFailed if the password command fails (should not be retried).
 func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter io.Writer, proxyAddr string) error {

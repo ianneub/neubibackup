@@ -7,6 +7,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"neubibackup/internal/util"
 )
 
 // BackupStatus represents a status update from restic during backup.
@@ -237,21 +239,7 @@ func (pw *ProgressWriter) writeSummary(summary BackupSummary) {
 		summary.FilesNew, summary.FilesChanged, summary.FilesUnmodified)
 	fmt.Fprintf(pw.underlying, "  Dirs:        %d new, %d changed, %d unmodified\n",
 		summary.DirsNew, summary.DirsChanged, summary.DirsUnmodified)
-	fmt.Fprintf(pw.underlying, "  Data added:  %s\n", formatBytes(summary.DataAdded))
+	fmt.Fprintf(pw.underlying, "  Data added:  %s\n", util.FormatBytes(summary.DataAdded))
 	fmt.Fprintf(pw.underlying, "  Processed:   %d files, %s\n",
-		summary.TotalFilesProcessed, formatBytes(summary.TotalBytesProcessed))
-}
-
-// formatBytes converts bytes to a human-readable string.
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+		summary.TotalFilesProcessed, util.FormatBytes(summary.TotalBytesProcessed))
 }

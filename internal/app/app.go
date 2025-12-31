@@ -173,11 +173,12 @@ func (a *App) Initialize() error {
 		Autostart:     a.autostartMgr,
 		OnBackupNow:   a.TriggerBackup,
 		OnStopBackup:  a.StopBackup,
-		OnOpenConfig:  a.openConfig,
-		OnOpenLogs:    a.openLogs,
-		OnOpenAppLog:  a.openAppLog,
-		OnUpdateClick: a.handleUpdateClick,
-		OnQuit:        a.onQuit,
+		OnOpenConfig:   a.openConfig,
+		OnOpenLogs:     a.openLogs,
+		OnOpenAppLog:   a.openAppLog,
+		OnUpdateClick:  a.handleUpdateClick,
+		OnVersionClick: a.openProjectWebsite,
+		OnQuit:         a.onQuit,
 	})
 
 	// Initialize updater and orchestrator
@@ -346,6 +347,12 @@ func (a *App) openAppLog() {
 
 func (a *App) handleUpdateClick() {
 	a.updateOrch.HandleUpdateClick(a.ctx)
+}
+
+func (a *App) openProjectWebsite() {
+	if err := config.OpenURL("https://github.com/ianneub/neubibackup"); err != nil {
+		slog.Error("Error opening project website", "error", err)
+	}
 }
 
 func (a *App) initScheduler() {

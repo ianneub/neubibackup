@@ -22,3 +22,10 @@ func OpenFolder(path string) error {
 	cmd := exec.Command("explorer", path)
 	return cmd.Start()
 }
+
+// OpenURL opens the given URL in the default browser.
+func OpenURL(url string) error {
+	rundll32 := filepath.Join(os.Getenv("SYSTEMROOT"), "System32", "rundll32.exe")
+	cmd := exec.Command(rundll32, "url.dll,FileProtocolHandler", url)
+	return cmd.Start()
+}

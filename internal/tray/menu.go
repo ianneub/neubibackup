@@ -40,13 +40,14 @@ type MenuConfig struct {
 	Autostart    AutostartProvider
 
 	// Action callbacks
-	OnBackupNow   func()
-	OnStopBackup  func()
-	OnOpenConfig  func()
-	OnOpenLogs    func()
-	OnOpenAppLog  func()
-	OnUpdateClick func()
-	OnQuit        func()
+	OnBackupNow    func()
+	OnStopBackup   func()
+	OnOpenConfig   func()
+	OnOpenLogs     func()
+	OnOpenAppLog   func()
+	OnUpdateClick  func()
+	OnVersionClick func()
+	OnQuit         func()
 }
 
 // Menu manages the system tray menu.
@@ -119,15 +120,20 @@ func (m *Menu) setup() {
 	mVersion := systray.AddMenuItem("Version "+m.cfg.Version+" (restic "+m.cfg.ResticVersion+")", "")
 	mVersion.Disable()
 
+	systray.AddSeparator()
+
+	// About
+	mAbout := systray.AddMenuItem("About", "Open project website")
+
 	// Quit
 	mQuit := systray.AddMenuItem("Quit", "Quit NeubiBackup")
 
 	// Start event loop
-	go m.eventLoop(mOpenConfig, mOpenLogs, mOpenAppLog, mQuit)
+	go m.eventLoop(mOpenConfig, mOpenLogs, mOpenAppLog, mAbout, mQuit)
 }
 
 // eventLoop handles menu item clicks.
-func (m *Menu) eventLoop(mOpenConfig, mOpenLogs, mOpenAppLog, mQuit *systray.MenuItem) {
+func (m *Menu) eventLoop(mOpenConfig, mOpenLogs, mOpenAppLog, mAbout, mQuit *systray.MenuItem) {
 	for {
 		select {
 		case <-m.mBackupNow.ClickedCh:
@@ -161,6 +167,11 @@ func (m *Menu) eventLoop(mOpenConfig, mOpenLogs, mOpenAppLog, mQuit *systray.Men
 		case <-m.mUpdateStatus.ClickedCh:
 			if m.cfg.OnUpdateClick != nil {
 				m.cfg.OnUpdateClick()
+			}
+
+		case <-mAbout.ClickedCh:
+			if m.cfg.OnVersionClick != nil {
+				m.cfg.OnVersionClick()
 			}
 
 		case <-mQuit.ClickedCh:

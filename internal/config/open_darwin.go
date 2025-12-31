@@ -18,3 +18,9 @@ func OpenFolder(path string) error {
 	cmd := exec.Command("open", path)
 	return cmd.Start()
 }
+
+// OpenURL opens the given URL in the default browser.
+func OpenURL(url string) error {
+	cmd := exec.Command("open", url)
+	return cmd.Start()
+}

@@ -14,6 +14,7 @@ version: 1
 schedule:
   time: "01:00"              # 24-hour format, local time
   # timezone: ""             # Optional, defaults to system timezone (e.g., "America/New_York")
+  # skip_on_battery: false   # Skip scheduled backups when on battery power (manual backups always run)
 
 # Restic repository settings
 repository:

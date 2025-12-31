@@ -543,3 +543,76 @@ func TestConfigExists(t *testing.T) {
 		t.Errorf("ConfigExists() error = %v", err)
 	}
 }
+
+func TestLoadFromFile_SkipOnBattery(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		expected bool
+	}{
+		{
+			name: "not specified defaults to false",
+			yaml: `version: 1
+schedule:
+  time: "01:00"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: false,
+		},
+		{
+			name: "explicitly false",
+			yaml: `version: 1
+schedule:
+  time: "01:00"
+  skip_on_battery: false
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: false,
+		},
+		{
+			name: "explicitly true",
+			yaml: `version: 1
+schedule:
+  time: "01:00"
+  skip_on_battery: true
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+
+			if err := os.WriteFile(configPath, []byte(tt.yaml), 0600); err != nil {
+				t.Fatalf("Failed to write test config: %v", err)
+			}
+
+			cfg, err := LoadFromFile(configPath)
+			if err != nil {
+				t.Fatalf("LoadFromFile() error = %v", err)
+			}
+
+			if cfg.Schedule.SkipOnBattery != tt.expected {
+				t.Errorf("Schedule.SkipOnBattery = %v, want %v", cfg.Schedule.SkipOnBattery, tt.expected)
+			}
+		})
+	}
+}

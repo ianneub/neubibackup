@@ -64,6 +64,7 @@ version: 1
 schedule:
   time: "02:00"
   timezone: "America/New_York"  # Optional, defaults to system timezone
+  skip_on_battery: false        # Optional, skip scheduled backups when on battery power
 
 # Your restic repository
 repository:
@@ -197,6 +198,10 @@ The app detects missed backups when:
 - No successful backup exists for today
 
 Make sure the app is set to **Start at Login** for reliable scheduling.
+
+### Battery power
+
+If you enable `skip_on_battery: true` in your config, scheduled backups will be deferred while running on battery power. The backup will run automatically when AC power is restored (if still due that day). Manual backups via "Backup Now" always run regardless of power state.
 
 ### Windows autostart not working
 

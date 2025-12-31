@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"neubibackup/internal/config"
+	"neubibackup/internal/power"
 	"neubibackup/internal/state"
 )
 
@@ -153,6 +154,14 @@ func (s *Scheduler) shouldRunNow() bool {
 	// Check if retries are paused due to non-retryable error (e.g., password failure)
 	if s.state.IsPaused() {
 		return false
+	}
+
+	// Check if should skip on battery power
+	if s.config.Schedule.SkipOnBattery {
+		if power.GetBatteryStatus() == power.BatteryStatusOnBattery {
+			slog.Info("Skipping scheduled backup - running on battery power")
+			return false
+		}
 	}
 
 	scheduleTime, err := parseTime(s.config.Schedule.Time)

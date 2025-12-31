@@ -9,16 +9,52 @@ import (
 )
 
 var (
-	user32                  = syscall.NewLazyDLL("user32.dll")
-	procRegisterClassExW    = user32.NewProc("RegisterClassExW")
-	procCreateWindowExW     = user32.NewProc("CreateWindowExW")
-	procDefWindowProcW      = user32.NewProc("DefWindowProcW")
-	procGetMessageW         = user32.NewProc("GetMessageW")
-	procTranslateMessage    = user32.NewProc("TranslateMessage")
-	procDispatchMessageW    = user32.NewProc("DispatchMessageW")
-	procDestroyWindow       = user32.NewProc("DestroyWindow")
-	procPostQuitMessage     = user32.NewProc("PostQuitMessage")
+	user32                   = syscall.NewLazyDLL("user32.dll")
+	kernel32                 = syscall.NewLazyDLL("kernel32.dll")
+	procRegisterClassExW     = user32.NewProc("RegisterClassExW")
+	procCreateWindowExW      = user32.NewProc("CreateWindowExW")
+	procDefWindowProcW       = user32.NewProc("DefWindowProcW")
+	procGetMessageW          = user32.NewProc("GetMessageW")
+	procTranslateMessage     = user32.NewProc("TranslateMessage")
+	procDispatchMessageW     = user32.NewProc("DispatchMessageW")
+	procDestroyWindow        = user32.NewProc("DestroyWindow")
+	procPostQuitMessage      = user32.NewProc("PostQuitMessage")
+	procGetSystemPowerStatus = kernel32.NewProc("GetSystemPowerStatus")
 )
+
+// systemPowerStatus represents the SYSTEM_POWER_STATUS structure from Windows API.
+type systemPowerStatus struct {
+	ACLineStatus        byte
+	BatteryFlag         byte
+	BatteryLifePercent  byte
+	SystemStatusFlag    byte
+	BatteryLifeTime     uint32
+	BatteryFullLifeTime uint32
+}
+
+const (
+	acLineOffline = 0
+	acLineOnline  = 1
+)
+
+// GetBatteryStatus checks the current power source on Windows.
+// Returns BatteryStatusUnknown if the status cannot be determined.
+func GetBatteryStatus() BatteryStatus {
+	var status systemPowerStatus
+	ret, _, _ := procGetSystemPowerStatus.Call(uintptr(unsafe.Pointer(&status)))
+	if ret == 0 {
+		return BatteryStatusUnknown
+	}
+
+	switch status.ACLineStatus {
+	case acLineOnline:
+		return BatteryStatusOnAC
+	case acLineOffline:
+		return BatteryStatusOnBattery
+	default:
+		return BatteryStatusUnknown
+	}
+}
 
 const (
 	WM_POWERBROADCAST      = 0x0218

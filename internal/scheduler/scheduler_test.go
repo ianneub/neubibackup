@@ -500,3 +500,79 @@ func TestShouldRunNow_PauseExpired(t *testing.T) {
 		t.Error("shouldRunNow() should return true when pause has expired")
 	}
 }
+
+func TestScheduler_SkipOnBatteryConfig(t *testing.T) {
+	// Test that the SkipOnBattery config is respected
+	tests := []struct {
+		name          string
+		skipOnBattery bool
+	}{
+		{
+			name:          "skip_on_battery disabled",
+			skipOnBattery: false,
+		},
+		{
+			name:          "skip_on_battery enabled",
+			skipOnBattery: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time:          "09:00",
+					SkipOnBattery: tt.skipOnBattery,
+				},
+			}
+			st := &state.State{}
+
+			s, err := New(cfg, st, func() {})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			// Verify the config is stored correctly
+			if s.config.Schedule.SkipOnBattery != tt.skipOnBattery {
+				t.Errorf("SkipOnBattery = %v, want %v", s.config.Schedule.SkipOnBattery, tt.skipOnBattery)
+			}
+		})
+	}
+}
+
+func TestTriggerNow_IgnoresBatteryStatus(t *testing.T) {
+	// Manual triggers (TriggerNow) should always run regardless of battery status
+	// This test verifies that TriggerNow does not go through shouldRunNow
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time:          "09:00",
+			SkipOnBattery: true, // Enabled, but should be ignored for manual triggers
+		},
+	}
+	st := &state.State{}
+
+	var called bool
+	var mu sync.Mutex
+	onBackup := func() {
+		mu.Lock()
+		called = true
+		mu.Unlock()
+	}
+
+	s, err := New(cfg, st, onBackup)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// TriggerNow should work regardless of battery status
+	s.TriggerNow()
+
+	// Wait for the goroutine to execute
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	if !called {
+		t.Error("TriggerNow() should call onBackup even with skip_on_battery enabled")
+	}
+	mu.Unlock()
+}

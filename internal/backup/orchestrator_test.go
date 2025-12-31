@@ -3,6 +3,8 @@ package backup
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -10,6 +12,18 @@ import (
 	"neubibackup/internal/restic"
 	"neubibackup/internal/state"
 )
+
+func TestMain(m *testing.M) {
+	// Use temp directory to avoid polluting real user data
+	tmpDir, err := os.MkdirTemp("", "neubibackup-test-*")
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Setenv("NEUBIBACKUP_APP_DIR", filepath.Join(tmpDir, "data"))
+	code := m.Run()
+	os.RemoveAll(tmpDir)
+	os.Exit(code)
+}
 
 // mockTailscale is a test implementation of TailscaleProvider.
 type mockTailscale struct {

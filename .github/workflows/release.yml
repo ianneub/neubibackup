@@ -77,7 +77,7 @@ jobs:
             export CGO_CFLAGS="${CGO_FLAGS}"
             export CGO_LDFLAGS="${CGO_FLAGS}"
           fi
-          go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" -o neubibackup .
+          go build -ldflags "-X neubibackup/internal/version.Version=${{ steps.version.outputs.VERSION }}" -o neubibackup .
 
       - name: Verify binary architecture and deployment target
         run: |
@@ -260,7 +260,7 @@ jobs:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: 1
-        run: go build -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -H windowsgui" -o neubibackup.exe .
+        run: go build -ldflags "-X neubibackup/internal/version.Version=${{ steps.version.outputs.VERSION }} -H windowsgui" -o neubibackup.exe .
 
       - name: Create NSIS installer script
         shell: bash

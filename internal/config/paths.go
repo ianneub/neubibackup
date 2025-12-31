@@ -4,13 +4,33 @@ package config
 import (
 	"os"
 	"path/filepath"
+
+	"neubibackup/internal/version"
 )
 
 const appDirName = "neubibackup"
 
 // GetAppDir returns the path to the application data directory.
-// This is ~/neubibackup/ on all platforms.
+// For production builds, this is ~/neubibackup/ on all platforms.
+// For dev builds (version="dev"), this returns .dev-data/ in the current
+// working directory for persistent dev data.
+// Tests can override via NEUBIBACKUP_APP_DIR environment variable.
 func GetAppDir() (string, error) {
+	// Allow env var override (for tests)
+	if dir := os.Getenv("NEUBIBACKUP_APP_DIR"); dir != "" {
+		return dir, nil
+	}
+
+	// Dev builds use .dev-data/ in current working directory
+	if version.IsDev() {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(cwd, ".dev-data"), nil
+	}
+
+	// Production builds use ~/neubibackup/
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

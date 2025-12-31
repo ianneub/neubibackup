@@ -241,9 +241,10 @@ func TestGetAppDir(t *testing.T) {
 		t.Fatalf("GetAppDir() error = %v", err)
 	}
 
-	// Should end with "neubibackup"
-	if !strings.HasSuffix(appDir, "neubibackup") {
-		t.Errorf("GetAppDir() = %q, want path ending with 'neubibackup'", appDir)
+	// In dev builds, path ends with ".dev-data"
+	// In production builds, path ends with "neubibackup"
+	if !strings.HasSuffix(appDir, ".dev-data") && !strings.HasSuffix(appDir, "neubibackup") {
+		t.Errorf("GetAppDir() = %q, want path ending with '.dev-data' or 'neubibackup'", appDir)
 	}
 
 	// Should be an absolute path
@@ -258,6 +259,24 @@ func TestGetAppDir(t *testing.T) {
 	}
 	if appDir != appDir2 {
 		t.Errorf("GetAppDir() inconsistent: first %q, second %q", appDir, appDir2)
+	}
+}
+
+func TestGetAppDir_EnvOverride(t *testing.T) {
+	// Save original env and restore after test
+	original := os.Getenv("NEUBIBACKUP_APP_DIR")
+	defer os.Setenv("NEUBIBACKUP_APP_DIR", original)
+
+	testDir := "/custom/test/dir"
+	os.Setenv("NEUBIBACKUP_APP_DIR", testDir)
+
+	appDir, err := GetAppDir()
+	if err != nil {
+		t.Fatalf("GetAppDir() error = %v", err)
+	}
+
+	if appDir != testDir {
+		t.Errorf("GetAppDir() = %q, want %q", appDir, testDir)
 	}
 }
 

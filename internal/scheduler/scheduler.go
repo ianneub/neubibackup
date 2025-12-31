@@ -65,7 +65,7 @@ func (s *Scheduler) UpdateState(st *state.State) {
 
 // Start begins the schedule loop. Call in a goroutine.
 func (s *Scheduler) Start(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 
 	// Check immediately on start
@@ -79,13 +79,6 @@ func (s *Scheduler) Start(ctx context.Context) {
 			s.checkAndTrigger()
 		}
 	}
-}
-
-// OnWake should be called when the system wakes from sleep.
-// It checks if a backup was missed and triggers one if needed.
-func (s *Scheduler) OnWake() {
-	slog.Info("System wake detected, checking for missed backup...")
-	s.checkAndTrigger()
 }
 
 // TriggerNow manually triggers a backup regardless of schedule.

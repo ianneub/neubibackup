@@ -7,8 +7,3 @@ package power
 func GetBatteryStatus() BatteryStatus {
 	return BatteryStatusUnknown
 }
-
-// Start is a no-op on unsupported platforms.
-func (w *Watcher) Start() {
-	// No wake detection on this platform
-}

@@ -385,15 +385,6 @@ func TestUpdateStatusWithNilMenu(t *testing.T) {
 	app.updateStatus()
 }
 
-// TestOnSystemWakeWithNilScheduler tests that onSystemWake is safe with nil scheduler
-func TestOnSystemWakeWithNilScheduler(t *testing.T) {
-	app := New("v1.0.0")
-	app.sched = nil
-
-	// Should not panic
-	app.onSystemWake()
-}
-
 // TestShutdownWithNilFields tests Shutdown with various nil fields
 func TestShutdownWithNilFields(t *testing.T) {
 	app := New("v1.0.0")

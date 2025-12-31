@@ -11,7 +11,6 @@ import (
 	"neubibackup/internal/backup"
 	"neubibackup/internal/config"
 	"neubibackup/internal/logging"
-	"neubibackup/internal/power"
 	"neubibackup/internal/restic"
 	"neubibackup/internal/scheduler"
 	"neubibackup/internal/state"
@@ -31,7 +30,6 @@ type App struct {
 	// Managers
 	sched         *scheduler.Scheduler
 	autostartMgr  *autostart.Manager
-	powerWatcher  *power.Watcher
 	configWatcher *fsnotify.Watcher
 	appUpdater    *updater.Updater
 	updateOrch    *updater.UpdateOrchestrator
@@ -205,10 +203,6 @@ func (a *App) Run() error {
 		a.initScheduler()
 	}
 
-	// Start power watcher
-	a.powerWatcher = power.New(a.onSystemWake)
-	a.powerWatcher.Start()
-
 	// Start status refresh ticker (updates "Last backup: X minutes ago" display)
 	a.statusTicker = time.NewTicker(1 * time.Minute)
 	go func() {
@@ -252,11 +246,6 @@ func (a *App) Shutdown() {
 
 	// Cancel any running backup
 	a.backupState.StopBackup()
-
-	// Stop power watcher
-	if a.powerWatcher != nil {
-		a.powerWatcher.Stop()
-	}
 
 	// Close config watcher
 	if a.configWatcher != nil {
@@ -363,12 +352,6 @@ func (a *App) initScheduler() {
 
 	go a.sched.Start(a.ctx)
 	slog.Info("Scheduler started")
-}
-
-func (a *App) onSystemWake() {
-	if a.sched != nil {
-		a.sched.OnWake()
-	}
 }
 
 // TriggerBackup starts a backup if one is not already running.

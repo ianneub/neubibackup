@@ -7,12 +7,10 @@ import (
 
 	"neubibackup/internal/app"
 	"neubibackup/internal/singleinstance"
+	"neubibackup/internal/version"
 
 	"github.com/getlantern/systray"
 )
-
-// version is set at build time via ldflags
-var version = "dev"
 
 // application holds the main App instance
 var application *app.App
@@ -37,7 +35,7 @@ func main() {
 }
 
 func onReady() {
-	application = app.New(version,
+	application = app.New(version.Version,
 		app.WithOnIconUpdate(systray.SetIcon),
 		app.WithOnQuit(systray.Quit),
 		app.WithSetTooltip(systray.SetTooltip),

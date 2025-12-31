@@ -2,8 +2,22 @@ package singleinstance
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	// Use temp directory to avoid polluting real user data
+	tmpDir, err := os.MkdirTemp("", "neubibackup-test-*")
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Setenv("NEUBIBACKUP_APP_DIR", filepath.Join(tmpDir, "data"))
+	code := m.Run()
+	os.RemoveAll(tmpDir)
+	os.Exit(code)
+}
 
 func TestAcquireAndRelease(t *testing.T) {
 	// Acquire the lock

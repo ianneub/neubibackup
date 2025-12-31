@@ -30,3 +30,6 @@ Thumbs.db
 
 # Debug
 __debug_bin*
+
+# Dev data directory (used by dev builds)
+.dev-data/

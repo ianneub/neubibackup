@@ -26,12 +26,14 @@ Cross-platform backup scheduler wrapping restic.
 
 ## Data Directory
 
-All files stored in `~/neubibackup/`:
+Production builds store files in `~/neubibackup/`:
 
 - `config.yaml` - User configuration
 - `state.yaml` - App-managed state (last backup time, errors)
 - `app.log` - Application log (truncated at 1MB, useful for debugging)
 - `logs/` - Last 25 backup logs (YYYY-MM-DDTHH-MM-SS.log)
+
+Dev builds (version="dev") use `.dev-data/` in the current working directory to avoid touching real user data.
 
 ## Project Structure
 
@@ -92,13 +94,37 @@ GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 2. **Write tests alongside code** - Tests should be written as part of the same task, not as a follow-up
 3. **No code is complete without tests** - A feature is not done until its tests are written and passing
 
+### Running Tests
+
+```bash
+go test ./...      # Run all tests
+go test -v ./...   # Run with verbose output
+```
+
+Tests use the `NEUBIBACKUP_APP_DIR` environment variable (set via `TestMain` in test files) to redirect data to temp directories, ensuring tests never touch the real `~/neubibackup/` or `.dev-data/` directories.
+
+**Important:** Any new test file that writes to data files (state, config, logs, lock files) must include a `TestMain` function to set up the temp directory:
+
+```go
+func TestMain(m *testing.M) {
+    tmpDir, err := os.MkdirTemp("", "neubibackup-test-*")
+    if err != nil {
+        os.Exit(1)
+    }
+    os.Setenv("NEUBIBACKUP_APP_DIR", filepath.Join(tmpDir, "data"))
+    code := m.Run()
+    os.RemoveAll(tmpDir)
+    os.Exit(code)
+}
+```
+
 ### Test Guidelines
 
 - Write unit tests for new functions and logic
 - Prefer real implementations over mocks when possible
 - Use table-driven tests for testing multiple cases
 - Test files go next to the code: `foo.go` → `foo_test.go`
-- Run `go test ./...` to verify all tests pass before committing
+- Run `go test ./...` to verify all tests pass after adding, modifying, or removing any functions
 
 ### What to Test
 

@@ -481,8 +481,8 @@ func (a *App) updateIcon() {
 	iconState := tray.DetermineIconState(
 		a.backupState.IsRunning(),
 		a.cfg != nil && a.cfg.IsConfigured(),
-		a.state.Backup.ConsecutiveFailures,
-		!a.state.Backup.LastSuccess.IsZero(),
+		a.state.GetConsecutiveFailures(),
+		a.state.HasSuccessfulBackup(),
 	)
 	a.onIconUpdate(tray.GetIconBytes(iconState))
 }

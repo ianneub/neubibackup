@@ -2,6 +2,7 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -631,4 +632,203 @@ func TestPausePersistence(t *testing.T) {
 	if !loaded.Backup.PausedUntil.Truncate(time.Second).Equal(pauseTime) {
 		t.Errorf("Loaded PausedUntil = %v, want %v", loaded.Backup.PausedUntil, pauseTime)
 	}
+}
+
+func TestAtomicWrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath := filepath.Join(tmpDir, "state.yaml")
+
+	// Create initial state
+	s := &State{}
+	s.RecordSuccess()
+
+	if err := s.SaveToFile(statePath); err != nil {
+		t.Fatalf("SaveToFile() error = %v", err)
+	}
+
+	// Verify the temp file doesn't exist (should be cleaned up)
+	tmpPath := statePath + ".tmp"
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Errorf("Temp file should not exist after successful save")
+	}
+
+	// Verify state was saved correctly
+	loaded, err := LoadFromFile(statePath)
+	if err != nil {
+		t.Fatalf("LoadFromFile() error = %v", err)
+	}
+
+	if loaded.Backup.LastSuccess.IsZero() {
+		t.Error("LastSuccess should not be zero after RecordSuccess")
+	}
+}
+
+func TestGetBackupState(t *testing.T) {
+	s := &State{}
+
+	// Initially all zero
+	backup := s.GetBackupState()
+	if !backup.LastSuccess.IsZero() {
+		t.Error("Expected LastSuccess to be zero initially")
+	}
+	if backup.ConsecutiveFailures != 0 {
+		t.Error("Expected ConsecutiveFailures to be 0 initially")
+	}
+
+	// After success
+	s.RecordSuccess()
+	backup = s.GetBackupState()
+	if backup.LastSuccess.IsZero() {
+		t.Error("Expected LastSuccess to be set after RecordSuccess")
+	}
+	if backup.ConsecutiveFailures != 0 {
+		t.Errorf("Expected ConsecutiveFailures = 0, got %d", backup.ConsecutiveFailures)
+	}
+
+	// After failure
+	s.RecordFailure(fmt.Errorf("test error"))
+	backup = s.GetBackupState()
+	if backup.ConsecutiveFailures != 1 {
+		t.Errorf("Expected ConsecutiveFailures = 1, got %d", backup.ConsecutiveFailures)
+	}
+	if backup.LastError != "test error" {
+		t.Errorf("Expected LastError = 'test error', got %q", backup.LastError)
+	}
+}
+
+func TestGetters(t *testing.T) {
+	s := &State{}
+
+	// Test GetLastSuccess
+	if !s.GetLastSuccess().IsZero() {
+		t.Error("GetLastSuccess should return zero initially")
+	}
+
+	// Test GetConsecutiveFailures
+	if s.GetConsecutiveFailures() != 0 {
+		t.Error("GetConsecutiveFailures should return 0 initially")
+	}
+
+	// Test HasSuccessfulBackup
+	if s.HasSuccessfulBackup() {
+		t.Error("HasSuccessfulBackup should return false initially")
+	}
+
+	// After success
+	s.RecordSuccess()
+	if s.GetLastSuccess().IsZero() {
+		t.Error("GetLastSuccess should not be zero after RecordSuccess")
+	}
+	if !s.HasSuccessfulBackup() {
+		t.Error("HasSuccessfulBackup should return true after RecordSuccess")
+	}
+
+	// After failures
+	for i := 0; i < 3; i++ {
+		s.RecordFailure(fmt.Errorf("error %d", i))
+	}
+	if s.GetConsecutiveFailures() != 3 {
+		t.Errorf("GetConsecutiveFailures = %d, want 3", s.GetConsecutiveFailures())
+	}
+}
+
+func TestHasBackedUpTodayAfter(t *testing.T) {
+	loc := time.Local
+
+	tests := []struct {
+		name        string
+		lastSuccess time.Time
+		afterTime   time.Time
+		want        bool
+	}{
+		{
+			name:        "never backed up",
+			lastSuccess: time.Time{},
+			afterTime:   time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
+			want:        false,
+		},
+		{
+			name:        "backed up today after scheduled time",
+			lastSuccess: time.Date(2025, 1, 1, 10, 0, 0, 0, loc),
+			afterTime:   time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
+			want:        true,
+		},
+		{
+			name:        "backed up today before scheduled time",
+			lastSuccess: time.Date(2025, 1, 1, 8, 0, 0, 0, loc),
+			afterTime:   time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
+			want:        false,
+		},
+		{
+			name:        "backed up today at exactly scheduled time",
+			lastSuccess: time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
+			afterTime:   time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
+			want:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &State{
+				Backup: BackupState{
+					LastSuccess: tt.lastSuccess,
+				},
+			}
+
+			// For the "today" check to work, we need to test with current date
+			// So we'll adjust the test dates to be relative to now
+			now := time.Now().In(loc)
+			if !tt.lastSuccess.IsZero() {
+				// Adjust lastSuccess to be today at the same hour/minute
+				s.Backup.LastSuccess = time.Date(
+					now.Year(), now.Month(), now.Day(),
+					tt.lastSuccess.Hour(), tt.lastSuccess.Minute(), 0, 0, loc,
+				)
+			}
+			afterTime := time.Date(
+				now.Year(), now.Month(), now.Day(),
+				tt.afterTime.Hour(), tt.afterTime.Minute(), 0, 0, loc,
+			)
+
+			got := s.HasBackedUpTodayAfter(loc, afterTime)
+			if got != tt.want {
+				t.Errorf("HasBackedUpTodayAfter() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConcurrentGetterAccess(t *testing.T) {
+	s := &State{}
+
+	var wg sync.WaitGroup
+	const numGoroutines = 10
+	const numOperations = 100
+
+	// Writers
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				s.RecordSuccess()
+			}
+		}()
+	}
+
+	// Readers using new getters
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				_ = s.GetBackupState()
+				_ = s.GetLastSuccess()
+				_ = s.GetConsecutiveFailures()
+				_ = s.HasSuccessfulBackup()
+			}
+		}()
+	}
+
+	wg.Wait()
 }

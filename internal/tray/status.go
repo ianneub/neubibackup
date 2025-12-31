@@ -16,14 +16,17 @@ func FormatStatus(st *state.State, isRunning bool) string {
 		return "Backup running..."
 	}
 
-	if st.Backup.LastSuccess.IsZero() {
-		if st.Backup.LastError != "" {
+	// Get a consistent snapshot of backup state
+	backup := st.GetBackupState()
+
+	if backup.LastSuccess.IsZero() {
+		if backup.LastError != "" {
 			return "Last backup failed"
 		}
 		return "Not yet backed up"
 	}
 
-	age := time.Since(st.Backup.LastSuccess)
+	age := time.Since(backup.LastSuccess)
 	return fmt.Sprintf("Last backup: %s", util.FormatDuration(age))
 }
 
@@ -33,8 +36,11 @@ func FormatStatusDetailed(st *state.State, isRunning bool) string {
 		return "Backup in progress..."
 	}
 
-	if st.Backup.LastError != "" && st.Backup.ConsecutiveFailures > 0 {
-		return fmt.Sprintf("Failed (%d attempts): %s", st.Backup.ConsecutiveFailures, st.Backup.LastError)
+	// Get a consistent snapshot of backup state
+	backup := st.GetBackupState()
+
+	if backup.LastError != "" && backup.ConsecutiveFailures > 0 {
+		return fmt.Sprintf("Failed (%d attempts): %s", backup.ConsecutiveFailures, backup.LastError)
 	}
 
 	return FormatStatus(st, isRunning)

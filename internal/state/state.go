@@ -101,15 +101,24 @@ func (s *State) SaveToFile(path string) error {
 	return s.saveToFileLocked(path)
 }
 
-// saveToFileLocked writes the state to a specific file. Caller must hold s.mu.
+// saveToFileLocked writes the state to a specific file atomically. Caller must hold s.mu.
+// Uses write-to-temp-then-rename pattern to prevent corruption if interrupted.
 func (s *State) saveToFileLocked(path string) error {
 	data, err := yaml.Marshal(s)
 	if err != nil {
 		return fmt.Errorf("marshaling state: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("writing state file: %w", err)
+	// Write to temp file first to ensure atomic write
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return fmt.Errorf("writing temp state file: %w", err)
+	}
+
+	// Atomic rename - on POSIX systems this is atomic within the same filesystem
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath) // Clean up temp file on failure
+		return fmt.Errorf("renaming state file: %w", err)
 	}
 
 	return nil
@@ -239,4 +248,60 @@ func (s *State) ClearPause() {
 		slog.Info("Backup pause cleared")
 		s.Backup.PausedUntil = time.Time{}
 	}
+}
+
+// GetBackupState returns a copy of the current backup state.
+// This provides a consistent snapshot of all backup fields for UI display.
+func (s *State) GetBackupState() BackupState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Backup
+}
+
+// GetLastSuccess returns the time of the last successful backup.
+func (s *State) GetLastSuccess() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Backup.LastSuccess
+}
+
+// GetConsecutiveFailures returns the number of consecutive backup failures.
+func (s *State) GetConsecutiveFailures() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Backup.ConsecutiveFailures
+}
+
+// HasSuccessfulBackup returns true if there has ever been a successful backup.
+func (s *State) HasSuccessfulBackup() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.Backup.LastSuccess.IsZero()
+}
+
+// HasBackedUpTodayAfter returns true if there was a successful backup today
+// at or after the specified time. This combines the day check and time check
+// in a single lock acquisition to avoid TOCTOU races.
+func (s *State) HasBackedUpTodayAfter(loc *time.Location, afterTime time.Time) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.Backup.LastSuccess.IsZero() {
+		return false
+	}
+
+	now := time.Now().In(loc)
+	last := s.Backup.LastSuccess.In(loc)
+
+	// Check same day
+	sameDay := now.Year() == last.Year() &&
+		now.Month() == last.Month() &&
+		now.Day() == last.Day()
+
+	if !sameDay {
+		return false
+	}
+
+	// Check if backup was at or after the specified time
+	return !last.Before(afterTime)
 }

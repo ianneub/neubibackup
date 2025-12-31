@@ -176,11 +176,8 @@ func (s *Scheduler) shouldRunNow() bool {
 	}
 
 	// If we already backed up today (after the scheduled time), no backup needed
-	if s.state.HasBackedUpToday(s.location) {
-		lastBackup := s.state.Backup.LastSuccess.In(s.location)
-		if !lastBackup.Before(todaySchedule) {
-			return false
-		}
+	if s.state.HasBackedUpTodayAfter(s.location, todaySchedule) {
+		return false
 	}
 
 	// We're past the scheduled time and haven't backed up yet today

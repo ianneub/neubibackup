@@ -261,6 +261,10 @@ xattr -d com.apple.quarantine /Applications/NeubiBackup.app
 
 Then relaunch the app.
 
+### App Bundle Updates
+
+Auto-updates on macOS only update the executable binary, not the full app bundle. If a new version adds features requiring macOS permissions (like Location Services for WiFi SSID detection), you'll need to manually reinstall from the DMG to get the updated Info.plist with the new permission descriptions.
+
 ## License
 
 MIT

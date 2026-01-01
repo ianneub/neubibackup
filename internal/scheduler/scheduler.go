@@ -146,51 +146,30 @@ func (s *Scheduler) checkAndTrigger() {
 // shouldRunNow checks if a backup should be triggered.
 // Must be called with mu held.
 func (s *Scheduler) shouldRunNow() bool {
-	// Check if should skip on battery power
-	if s.config.Schedule.SkipOnBattery {
-		if power.GetBatteryStatus() == power.BatteryStatusOnBattery {
-			slog.Info("Skipping scheduled backup - running on battery power")
-			return false
-		}
-	}
-
-	// Check if should skip based on WiFi SSID
-	// Only skip if:
-	// 1. AllowedSSIDs is non-empty (feature is enabled)
-	// 2. We successfully detected a network (not unknown)
-	// 3. The detected SSID is not in the allowed list
-	if len(s.config.Schedule.AllowedSSIDs) > 0 {
-		netInfo := network.GetCurrentNetwork()
-		slog.Debug("Checking WiFi SSID restriction",
-			"status", netInfo.Status,
-			"ssid", netInfo.SSID,
-			"allowed_ssids", s.config.Schedule.AllowedSSIDs)
-		if netInfo.Status == network.NetworkStatusConnected {
-			if !s.isSSIDAllowed(netInfo.SSID) {
-				slog.Info("Skipping scheduled backup - not on allowed SSID",
-					"current_ssid", netInfo.SSID,
-					"allowed_ssids", s.config.Schedule.AllowedSSIDs)
-				return false
-			}
-			slog.Info("WiFi SSID allowed, proceeding with backup",
-				"current_ssid", netInfo.SSID)
-		} else {
-			slog.Info("WiFi SSID not available - proceeding with backup (fail-open)",
-				"hint", "On macOS, grant Location permission in System Settings for SSID detection")
-		}
-	}
-
-	// Check user activity - skip if user has been idle for too long
-	// This ensures the user is present (keychain likely unlocked for password_command)
-	const maxIdleTime = 2 * time.Hour
-	idleTime := idle.GetIdleTime()
-	if idleTime > maxIdleTime {
-		slog.Info("Skipping scheduled backup - user has been idle too long",
-			"idle_time", idleTime.Round(time.Minute),
-			"max_idle", maxIdleTime)
+	// First check if we're due for a backup based on schedule
+	if !s.isBackupDue() {
 		return false
 	}
 
+	// Now check pre-flight conditions
+	if !s.checkBatteryOK() {
+		return false
+	}
+
+	if !s.checkSSIDOK() {
+		return false
+	}
+
+	if !s.checkUserActive() {
+		return false
+	}
+
+	return true
+}
+
+// isBackupDue checks if a backup is due based on schedule time.
+// Must be called with mu held.
+func (s *Scheduler) isBackupDue() bool {
 	scheduleTime, err := parseTime(s.config.Schedule.Time)
 	if err != nil {
 		slog.Error("Invalid schedule time", "time", s.config.Schedule.Time, "error", err)
@@ -216,7 +195,66 @@ func (s *Scheduler) shouldRunNow() bool {
 		return false
 	}
 
-	// We're past the scheduled time and haven't backed up yet today
+	return true
+}
+
+// checkBatteryOK returns true if battery status allows backup to proceed.
+// Must be called with mu held.
+func (s *Scheduler) checkBatteryOK() bool {
+	if !s.config.Schedule.SkipOnBattery {
+		return true
+	}
+
+	if power.GetBatteryStatus() == power.BatteryStatusOnBattery {
+		slog.Info("Skipping scheduled backup - running on battery power")
+		return false
+	}
+
+	return true
+}
+
+// checkSSIDOK returns true if WiFi SSID allows backup to proceed.
+// Must be called with mu held.
+func (s *Scheduler) checkSSIDOK() bool {
+	if len(s.config.Schedule.AllowedSSIDs) == 0 {
+		return true
+	}
+
+	netInfo := network.GetCurrentNetwork()
+	slog.Debug("Checking WiFi SSID restriction",
+		"status", netInfo.Status,
+		"ssid", netInfo.SSID,
+		"allowed_ssids", s.config.Schedule.AllowedSSIDs)
+
+	if netInfo.Status == network.NetworkStatusConnected {
+		if !s.isSSIDAllowed(netInfo.SSID) {
+			slog.Info("Skipping scheduled backup - not on allowed SSID",
+				"current_ssid", netInfo.SSID,
+				"allowed_ssids", s.config.Schedule.AllowedSSIDs)
+			return false
+		}
+		slog.Info("WiFi SSID allowed, proceeding with backup",
+			"current_ssid", netInfo.SSID)
+	} else {
+		slog.Info("WiFi SSID not available - proceeding with backup (fail-open)",
+			"hint", "On macOS, grant Location permission in System Settings for SSID detection")
+	}
+
+	return true
+}
+
+// checkUserActive returns true if user activity allows backup to proceed.
+func (s *Scheduler) checkUserActive() bool {
+	const maxIdleTime = 2 * time.Hour
+	idleTime := idle.GetIdleTime()
+
+	if idleTime > maxIdleTime {
+		slog.Info("Skipping scheduled backup - user has been idle too long",
+			"idle_time", idleTime.Round(time.Minute),
+			"max_idle", maxIdleTime)
+		return false
+	}
+
 	return true
 }
 

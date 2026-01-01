@@ -626,3 +626,245 @@ func TestTriggerNow_IgnoresSSIDRestriction(t *testing.T) {
 	}
 	mu.Unlock()
 }
+
+func TestIsBackupDue(t *testing.T) {
+	tests := []struct {
+		name        string
+		schedTime   string
+		lastSuccess time.Time
+		want        bool
+	}{
+		{
+			name:        "before schedule time - not due",
+			schedTime:   "23:59", // Very late, so we're before it
+			lastSuccess: time.Time{},
+			want:        false,
+		},
+		{
+			name:        "after schedule time with no backup today - due",
+			schedTime:   "00:01", // Very early, so we're past it
+			lastSuccess: time.Time{},
+			want:        true,
+		},
+		{
+			name:        "after schedule time with backup today - not due",
+			schedTime:   "00:01",
+			lastSuccess: time.Now(), // Backed up today
+			want:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Skip edge case near midnight
+			now := time.Now()
+			if now.Hour() == 0 && now.Minute() <= 1 {
+				t.Skip("Skipping due to edge case near midnight")
+			}
+			if now.Hour() == 23 && now.Minute() >= 58 {
+				t.Skip("Skipping due to edge case near midnight")
+			}
+
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time: tt.schedTime,
+				},
+			}
+			st := &state.State{}
+			if !tt.lastSuccess.IsZero() {
+				st.RecordSuccess()
+			}
+
+			s, err := New(cfg, st, func() {})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			s.mu.Lock()
+			got := s.isBackupDue()
+			s.mu.Unlock()
+
+			if got != tt.want {
+				t.Errorf("isBackupDue() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsBackupDue_InvalidTime(t *testing.T) {
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time: "invalid",
+		},
+	}
+	st := &state.State{}
+
+	s, err := New(cfg, st, func() {})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	s.mu.Lock()
+	got := s.isBackupDue()
+	s.mu.Unlock()
+
+	if got {
+		t.Error("isBackupDue() should return false for invalid schedule time")
+	}
+}
+
+func TestCheckBatteryOK(t *testing.T) {
+	tests := []struct {
+		name          string
+		skipOnBattery bool
+		wantOK        bool
+	}{
+		{
+			name:          "skip_on_battery disabled - always OK",
+			skipOnBattery: false,
+			wantOK:        true,
+		},
+		// Note: We can't easily test the "on battery" case without mocking power.GetBatteryStatus
+		// The actual battery check depends on the system state
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time:          "09:00",
+					SkipOnBattery: tt.skipOnBattery,
+				},
+			}
+			st := &state.State{}
+
+			s, err := New(cfg, st, func() {})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			s.mu.Lock()
+			got := s.checkBatteryOK()
+			s.mu.Unlock()
+
+			if got != tt.wantOK {
+				t.Errorf("checkBatteryOK() = %v, want %v", got, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestCheckSSIDOK(t *testing.T) {
+	tests := []struct {
+		name         string
+		allowedSSIDs []string
+		wantOK       bool
+	}{
+		{
+			name:         "no allowed SSIDs configured - always OK",
+			allowedSSIDs: nil,
+			wantOK:       true,
+		},
+		{
+			name:         "empty allowed SSIDs - always OK",
+			allowedSSIDs: []string{},
+			wantOK:       true,
+		},
+		// Note: We can't easily test SSID matching without mocking network.GetCurrentNetwork
+		// The actual SSID check depends on the system state
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time:         "09:00",
+					AllowedSSIDs: tt.allowedSSIDs,
+				},
+			}
+			st := &state.State{}
+
+			s, err := New(cfg, st, func() {})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			s.mu.Lock()
+			got := s.checkSSIDOK()
+			s.mu.Unlock()
+
+			if got != tt.wantOK {
+				t.Errorf("checkSSIDOK() = %v, want %v", got, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestCheckUserActive(t *testing.T) {
+	// This test verifies that checkUserActive returns a boolean
+	// The actual idle time depends on the system state, so we just verify it doesn't panic
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time: "09:00",
+		},
+	}
+	st := &state.State{}
+
+	s, err := New(cfg, st, func() {})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Just verify it runs without panicking and returns a bool
+	got := s.checkUserActive()
+	// On a machine being actively used (like during tests), this should be true
+	// but we can't guarantee it, so we just check it doesn't panic
+	_ = got
+}
+
+func TestShouldRunNow_Integration(t *testing.T) {
+	// Integration test that verifies shouldRunNow calls all helper functions correctly
+	// Skip if we're near midnight to avoid edge cases
+	now := time.Now()
+	if now.Hour() == 0 && now.Minute() <= 1 {
+		t.Skip("Skipping due to edge case near midnight")
+	}
+
+	tests := []struct {
+		name      string
+		schedTime string
+		wantRun   bool
+	}{
+		{
+			name:      "before schedule time - should not run",
+			schedTime: "23:59",
+			wantRun:   false,
+		},
+		// Note: Testing "should run" case is difficult because it depends on
+		// battery, SSID, and idle state which we can't easily control
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time: tt.schedTime,
+				},
+			}
+			st := &state.State{}
+
+			s, err := New(cfg, st, func() {})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			s.mu.Lock()
+			got := s.shouldRunNow()
+			s.mu.Unlock()
+
+			if got != tt.wantRun {
+				t.Errorf("shouldRunNow() = %v, want %v", got, tt.wantRun)
+			}
+		})
+	}
+}

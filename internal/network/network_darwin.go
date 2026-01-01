@@ -26,7 +26,10 @@ void requestLocationPermission() {
     if (@available(macOS 11.0, *)) {
         status = locationManager.authorizationStatus;
     } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         status = [CLLocationManager authorizationStatus];
+#pragma clang diagnostic pop
     }
 
     // Only request if not determined yet
@@ -50,7 +53,10 @@ int getLocationAuthStatus() {
     if (@available(macOS 11.0, *)) {
         status = locationManager.authorizationStatus;
     } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         status = [CLLocationManager authorizationStatus];
+#pragma clang diagnostic pop
     }
 
     switch (status) {

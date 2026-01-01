@@ -226,6 +226,19 @@ Note: SSID matching is case-sensitive.
 
 If Location Services permission is not granted, SSID detection will fail and backups will proceed (fail-open behavior).
 
+### User activity requirement
+
+Scheduled backups only run when you've been active at your computer within the last 2 hours. This prevents backups from attempting to run overnight when your keychain might be locked (which would cause `password_command` to fail).
+
+When the app checks if a backup should run:
+
+- If you've had keyboard/mouse activity in the last 2 hours: backup proceeds
+- If you've been idle for more than 2 hours: backup is skipped (will retry on next schedule check)
+
+This means backups automatically run when you're actively using your computer (keychain unlocked), and wait when you're away. Manual backups via "Backup Now" always run regardless of activity.
+
+The activity detection works on macOS and Windows.
+
 ### Windows autostart not working
 
 NeubiBackup uses Windows Task Scheduler for automatic startup, which allows the app to start with administrator privileges needed for VSS snapshots.

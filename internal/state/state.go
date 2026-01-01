@@ -19,10 +19,6 @@ type BackupState struct {
 	LastSuccess         time.Time `yaml:"last_success"`
 	LastError           string    `yaml:"last_error"`
 	ConsecutiveFailures int       `yaml:"consecutive_failures"`
-	// PausedUntil indicates automatic retries should be skipped until this time.
-	// This is set after non-retryable errors (e.g., password failures) to prevent
-	// the scheduler from triggering backups every minute when retrying won't help.
-	PausedUntil time.Time `yaml:"paused_until,omitempty"`
 }
 
 // UpdateState holds update-related state.
@@ -134,7 +130,6 @@ func (s *State) RecordSuccess() {
 	s.Backup.LastSuccess = now
 	s.Backup.LastError = ""
 	s.Backup.ConsecutiveFailures = 0
-	s.Backup.PausedUntil = time.Time{} // Clear any pause on success
 }
 
 // RecordFailure updates the state after a failed backup.
@@ -205,49 +200,6 @@ func (s *State) SetLastUpdateSuccess(version string, t time.Time) {
 	s.Update.LastVersion = version
 	s.Update.LastTime = t
 	s.Update.LastError = ""
-}
-
-// RecordNonRetryableFailure updates the state after a failure that should not be retried.
-// This pauses automatic retries until midnight in the given timezone.
-func (s *State) RecordNonRetryableFailure(err error, loc *time.Location) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.Backup.LastAttempt = time.Now()
-	s.Backup.LastError = err.Error()
-	s.Backup.ConsecutiveFailures++
-
-	// Pause until midnight in the given timezone
-	now := time.Now().In(loc)
-	tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
-	s.Backup.PausedUntil = tomorrow
-
-	slog.Info("Backup paused until tomorrow due to non-retryable error",
-		"paused_until", tomorrow,
-		"error", err.Error())
-}
-
-// IsPaused returns true if automatic retries are currently paused.
-func (s *State) IsPaused() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.Backup.PausedUntil.IsZero() {
-		return false
-	}
-	return time.Now().Before(s.Backup.PausedUntil)
-}
-
-// ClearPause removes the retry pause.
-// Call this when the user manually triggers a backup or changes the config.
-func (s *State) ClearPause() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if !s.Backup.PausedUntil.IsZero() {
-		slog.Info("Backup pause cleared")
-		s.Backup.PausedUntil = time.Time{}
-	}
 }
 
 // GetBackupState returns a copy of the current backup state.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"neubibackup/internal/config"
+	"neubibackup/internal/idle"
 	"neubibackup/internal/network"
 	"neubibackup/internal/power"
 	"neubibackup/internal/state"
@@ -145,11 +146,6 @@ func (s *Scheduler) checkAndTrigger() {
 // shouldRunNow checks if a backup should be triggered.
 // Must be called with mu held.
 func (s *Scheduler) shouldRunNow() bool {
-	// Check if retries are paused due to non-retryable error (e.g., password failure)
-	if s.state.IsPaused() {
-		return false
-	}
-
 	// Check if should skip on battery power
 	if s.config.Schedule.SkipOnBattery {
 		if power.GetBatteryStatus() == power.BatteryStatusOnBattery {
@@ -182,6 +178,17 @@ func (s *Scheduler) shouldRunNow() bool {
 			slog.Info("WiFi SSID not available - proceeding with backup (fail-open)",
 				"hint", "On macOS, grant Location permission in System Settings for SSID detection")
 		}
+	}
+
+	// Check user activity - skip if user has been idle for too long
+	// This ensures the user is present (keychain likely unlocked for password_command)
+	const maxIdleTime = 2 * time.Hour
+	idleTime := idle.GetIdleTime()
+	if idleTime > maxIdleTime {
+		slog.Info("Skipping scheduled backup - user has been idle too long",
+			"idle_time", idleTime.Round(time.Minute),
+			"max_idle", maxIdleTime)
+		return false
 	}
 
 	scheduleTime, err := parseTime(s.config.Schedule.Time)

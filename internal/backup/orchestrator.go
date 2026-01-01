@@ -75,7 +75,6 @@ func WithProgressCallback(cb ProgressCallback) OrchestratorOption {
 }
 
 // WithLocation sets the timezone location for the orchestrator.
-// This is used when recording non-retryable failures to pause until midnight.
 func WithLocation(loc *time.Location) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.location = loc
@@ -222,16 +221,7 @@ func (o *Orchestrator) handleTailscaleFailure(err error) {
 
 // handleBackupFailure handles a backup failure.
 func (o *Orchestrator) handleBackupFailure(backupErr error, logFile *os.File) {
-	// Check if this is a non-retryable error (password failure)
-	if errors.Is(backupErr, restic.ErrPasswordFailed) {
-		loc := o.location
-		if loc == nil {
-			loc = time.Local
-		}
-		o.state.RecordNonRetryableFailure(backupErr, loc)
-	} else {
-		o.state.RecordFailure(backupErr)
-	}
+	o.state.RecordFailure(backupErr)
 	if saveErr := o.state.Save(); saveErr != nil {
 		slog.Error("Error saving state", "error", saveErr)
 	}

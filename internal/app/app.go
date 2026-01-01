@@ -355,15 +355,12 @@ func (a *App) initScheduler() {
 }
 
 // TriggerBackup starts a backup if one is not already running.
-// This is called for manual backups (via menu) and clears any retry pause.
+// This is called for manual backups (via menu).
 func (a *App) TriggerBackup() {
 	if a.backupState.IsRunning() {
 		slog.Info("Backup already running")
 		return
 	}
-
-	// Clear any pause so manual backup can proceed even after password errors
-	a.state.ClearPause()
 
 	go a.runBackup()
 }
@@ -425,7 +422,7 @@ func (a *App) runBackup() {
 		a.updateStatus()
 	}
 
-	// Get location from scheduler for timezone-aware pause handling
+	// Get location from scheduler for timezone-aware time handling
 	var loc *time.Location
 	if a.sched != nil {
 		loc = a.sched.Location()
@@ -524,9 +521,6 @@ func (a *App) ReloadConfig() {
 	}
 
 	a.cfg = newCfg
-
-	// Clear any pause - user may have fixed the password or other config issue
-	a.state.ClearPause()
 
 	// Update scheduler if it exists
 	if a.sched != nil {

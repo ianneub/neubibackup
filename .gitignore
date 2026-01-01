@@ -33,3 +33,6 @@ __debug_bin*
 
 # Dev data directory (used by dev builds)
 .dev-data/
+
+# macOS app bundle for testing
+NeubiBackup.app/

@@ -100,6 +100,7 @@ backup:
     - ".DS_Store"
     - "node_modules"
     - ".Trash"
+  # exclude_file: "/path/to/excludes.txt"  # Optional: file with exclude patterns (one per line)
 
 # Optional: Additional restic arguments
 restic_args:

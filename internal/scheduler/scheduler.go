@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"neubibackup/internal/config"
+	"neubibackup/internal/network"
 	"neubibackup/internal/power"
 	"neubibackup/internal/state"
 )
@@ -157,6 +158,32 @@ func (s *Scheduler) shouldRunNow() bool {
 		}
 	}
 
+	// Check if should skip based on WiFi SSID
+	// Only skip if:
+	// 1. AllowedSSIDs is non-empty (feature is enabled)
+	// 2. We successfully detected a network (not unknown)
+	// 3. The detected SSID is not in the allowed list
+	if len(s.config.Schedule.AllowedSSIDs) > 0 {
+		netInfo := network.GetCurrentNetwork()
+		slog.Debug("Checking WiFi SSID restriction",
+			"status", netInfo.Status,
+			"ssid", netInfo.SSID,
+			"allowed_ssids", s.config.Schedule.AllowedSSIDs)
+		if netInfo.Status == network.NetworkStatusConnected {
+			if !s.isSSIDAllowed(netInfo.SSID) {
+				slog.Info("Skipping scheduled backup - not on allowed SSID",
+					"current_ssid", netInfo.SSID,
+					"allowed_ssids", s.config.Schedule.AllowedSSIDs)
+				return false
+			}
+			slog.Info("WiFi SSID allowed, proceeding with backup",
+				"current_ssid", netInfo.SSID)
+		} else {
+			slog.Info("WiFi SSID not available - proceeding with backup (fail-open)",
+				"hint", "On macOS, grant Location permission in System Settings for SSID detection")
+		}
+	}
+
 	scheduleTime, err := parseTime(s.config.Schedule.Time)
 	if err != nil {
 		slog.Error("Invalid schedule time", "time", s.config.Schedule.Time, "error", err)
@@ -240,4 +267,14 @@ func getLocation(cfg *config.Config) (*time.Location, error) {
 	}
 
 	return loc, nil
+}
+
+// isSSIDAllowed checks if the given SSID is in the allowed SSIDs list.
+func (s *Scheduler) isSSIDAllowed(ssid string) bool {
+	for _, allowed := range s.config.Schedule.AllowedSSIDs {
+		if allowed == ssid {
+			return true
+		}
+	}
+	return false
 }

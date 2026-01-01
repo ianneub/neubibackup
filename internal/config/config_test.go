@@ -635,3 +635,102 @@ backup:
 		})
 	}
 }
+
+func TestLoadFromFile_AllowedSSIDs(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		expected []string
+	}{
+		{
+			name: "not specified defaults to empty",
+			yaml: `version: 1
+schedule:
+  time: "01:00"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: nil,
+		},
+		{
+			name: "empty list",
+			yaml: `version: 1
+schedule:
+  time: "01:00"
+  allowed_ssids: []
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: []string{},
+		},
+		{
+			name: "single SSID",
+			yaml: `version: 1
+schedule:
+  time: "01:00"
+  allowed_ssids:
+    - "HomeWiFi"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: []string{"HomeWiFi"},
+		},
+		{
+			name: "multiple SSIDs",
+			yaml: `version: 1
+schedule:
+  time: "01:00"
+  allowed_ssids:
+    - "HomeWiFi"
+    - "OfficeNetwork"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: []string{"HomeWiFi", "OfficeNetwork"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+
+			if err := os.WriteFile(configPath, []byte(tt.yaml), 0600); err != nil {
+				t.Fatalf("Failed to write test config: %v", err)
+			}
+
+			cfg, err := LoadFromFile(configPath)
+			if err != nil {
+				t.Fatalf("LoadFromFile() error = %v", err)
+			}
+
+			if len(cfg.Schedule.AllowedSSIDs) != len(tt.expected) {
+				t.Errorf("Schedule.AllowedSSIDs = %v, want %v",
+					cfg.Schedule.AllowedSSIDs, tt.expected)
+				return
+			}
+			for i, ssid := range cfg.Schedule.AllowedSSIDs {
+				if i < len(tt.expected) && ssid != tt.expected[i] {
+					t.Errorf("Schedule.AllowedSSIDs[%d] = %q, want %q",
+						i, ssid, tt.expected[i])
+				}
+			}
+		})
+	}
+}

@@ -136,6 +136,8 @@ jobs:
               <array>
                   <string>${ARCH_STRING}</string>
               </array>
+              <key>NSLocationWhenInUseUsageDescription</key>
+              <string>NeubiBackup uses your location to detect the current WiFi network name (SSID) for the allowed_ssids feature. This allows backups to run only on specific networks you configure.</string>
           </dict>
           </plist>
           EOF

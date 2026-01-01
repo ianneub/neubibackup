@@ -576,3 +576,148 @@ func TestTriggerNow_IgnoresBatteryStatus(t *testing.T) {
 	}
 	mu.Unlock()
 }
+
+func TestScheduler_AllowedSSIDsConfig(t *testing.T) {
+	tests := []struct {
+		name         string
+		allowedSSIDs []string
+	}{
+		{
+			name:         "no allowed SSIDs (feature disabled)",
+			allowedSSIDs: nil,
+		},
+		{
+			name:         "empty allowed SSIDs (feature disabled)",
+			allowedSSIDs: []string{},
+		},
+		{
+			name:         "single allowed SSID",
+			allowedSSIDs: []string{"HomeWiFi"},
+		},
+		{
+			name:         "multiple allowed SSIDs",
+			allowedSSIDs: []string{"HomeWiFi", "OfficeNetwork", "CoffeeShop"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time:         "09:00",
+					AllowedSSIDs: tt.allowedSSIDs,
+				},
+			}
+			st := &state.State{}
+
+			s, err := New(cfg, st, func() {})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			// Verify the config is stored correctly
+			if len(s.config.Schedule.AllowedSSIDs) != len(tt.allowedSSIDs) {
+				t.Errorf("AllowedSSIDs length = %d, want %d",
+					len(s.config.Schedule.AllowedSSIDs), len(tt.allowedSSIDs))
+			}
+		})
+	}
+}
+
+func TestIsSSIDAllowed(t *testing.T) {
+	tests := []struct {
+		name         string
+		allowedSSIDs []string
+		ssid         string
+		want         bool
+	}{
+		{
+			name:         "SSID in list",
+			allowedSSIDs: []string{"HomeWiFi", "OfficeNetwork"},
+			ssid:         "HomeWiFi",
+			want:         true,
+		},
+		{
+			name:         "SSID not in list",
+			allowedSSIDs: []string{"HomeWiFi", "OfficeNetwork"},
+			ssid:         "CoffeeShop",
+			want:         false,
+		},
+		{
+			name:         "empty list",
+			allowedSSIDs: []string{},
+			ssid:         "AnyNetwork",
+			want:         false,
+		},
+		{
+			name:         "case sensitive match",
+			allowedSSIDs: []string{"HomeWiFi"},
+			ssid:         "homewifi",
+			want:         false, // Case-sensitive
+		},
+		{
+			name:         "exact match required",
+			allowedSSIDs: []string{"HomeWiFi"},
+			ssid:         "HomeWiFi-5G",
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Schedule: config.ScheduleConfig{
+					Time:         "09:00",
+					AllowedSSIDs: tt.allowedSSIDs,
+				},
+			}
+			st := &state.State{}
+
+			s, err := New(cfg, st, func() {})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			got := s.isSSIDAllowed(tt.ssid)
+			if got != tt.want {
+				t.Errorf("isSSIDAllowed(%q) = %v, want %v", tt.ssid, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTriggerNow_IgnoresSSIDRestriction(t *testing.T) {
+	// Manual triggers (TriggerNow) should always run regardless of SSID
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			Time:         "09:00",
+			AllowedSSIDs: []string{"HomeWiFi"}, // Restricted, but should be ignored
+		},
+	}
+	st := &state.State{}
+
+	var called bool
+	var mu sync.Mutex
+	onBackup := func() {
+		mu.Lock()
+		called = true
+		mu.Unlock()
+	}
+
+	s, err := New(cfg, st, onBackup)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// TriggerNow should work regardless of SSID
+	s.TriggerNow()
+
+	// Wait for the goroutine to execute
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	if !called {
+		t.Error("TriggerNow() should call onBackup even with allowed_ssids configured")
+	}
+	mu.Unlock()
+}

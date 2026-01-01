@@ -15,6 +15,7 @@ A simple system tray application that automatically backs up your files using [r
 - **No restic installation required** - Restic is bundled with the app
 - **Automatic updates** - Updates are downloaded and applied silently in the background
 - **Tailscale integration** - Optional support for accessing private repos via Tailscale
+- **WiFi network filtering** - Optional: Only run scheduled backups on specific networks
 
 ## Supported Platforms
 
@@ -65,6 +66,9 @@ schedule:
   time: "02:00"
   timezone: "America/New_York"  # Optional, defaults to system timezone
   skip_on_battery: false        # Optional, skip scheduled backups when on battery power
+  # allowed_ssids:              # Optional, only backup on these WiFi SSIDs
+  #   - "HomeWiFi"
+  #   - "OfficeNetwork"
 
 # Your restic repository
 repository:
@@ -202,6 +206,25 @@ Make sure the app is set to **Start at Login** for reliable scheduling.
 ### Battery power
 
 If you enable `skip_on_battery: true` in your config, scheduled backups will be deferred while running on battery power. The backup will run automatically when AC power is restored (if still due that day). Manual backups via "Backup Now" always run regardless of power state.
+
+### WiFi SSID restrictions
+
+If you configure `allowed_ssids`, scheduled backups will only run when connected to one of the listed WiFi SSIDs. Behavior:
+
+- If your current SSID matches any in the list: backup runs
+- If your SSID doesn't match: backup is skipped (will retry on next schedule check)
+- If WiFi is off/disconnected/cannot be detected: backup runs (fail-open for reliability)
+- Manual backups via "Backup Now" always run regardless of SSID
+
+Note: SSID matching is case-sensitive.
+
+**macOS Location Permission Required**: On macOS 14 (Sonoma) and later, accessing the WiFi SSID requires Location Services permission. When you first configure `allowed_ssids`, macOS will prompt you to grant location access. If you miss the prompt or need to enable it manually:
+
+1. Open **System Settings** > **Privacy & Security** > **Location Services**
+2. Enable Location Services (if disabled)
+3. Find **NeubiBackup** in the app list and enable it
+
+If Location Services permission is not granted, SSID detection will fail and backups will proceed (fail-open behavior).
 
 ### Windows autostart not working
 

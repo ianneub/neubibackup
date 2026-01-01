@@ -28,9 +28,10 @@ type Config struct {
 
 // ScheduleConfig defines when backups should run.
 type ScheduleConfig struct {
-	Time          string `yaml:"time"`            // 24-hour format, e.g., "01:00"
-	Timezone      string `yaml:"timezone"`        // Optional, defaults to system timezone
-	SkipOnBattery bool   `yaml:"skip_on_battery"` // Skip scheduled backups when on battery power
+	Time          string   `yaml:"time"`            // 24-hour format, e.g., "01:00"
+	Timezone      string   `yaml:"timezone"`        // Optional, defaults to system timezone
+	SkipOnBattery bool     `yaml:"skip_on_battery"` // Skip scheduled backups when on battery power
+	AllowedSSIDs  []string `yaml:"allowed_ssids"`   // Only run scheduled backups on these WiFi SSIDs (empty = no restriction)
 }
 
 // RepositoryConfig defines the restic repository settings.

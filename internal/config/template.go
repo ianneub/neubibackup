@@ -15,6 +15,9 @@ schedule:
   time: "01:00"              # 24-hour format, local time
   # timezone: ""             # Optional, defaults to system timezone (e.g., "America/New_York")
   # skip_on_battery: false   # Skip scheduled backups when on battery power (manual backups always run)
+  # allowed_ssids: []        # Only run scheduled backups on these WiFi SSIDs (empty = no restriction)
+  #   - "HomeWiFi"           # Example: backup on home network
+  #   - "OfficeNetwork"      # Example: also backup on office network
 
 # Restic repository settings
 repository:

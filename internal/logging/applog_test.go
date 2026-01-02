@@ -487,6 +487,40 @@ func TestSplitHandler_Enabled(t *testing.T) {
 	}
 }
 
+func TestParseLogLevel(t *testing.T) {
+	tests := []struct {
+		input string
+		want  slog.Level
+	}{
+		{"debug", slog.LevelDebug},
+		{"DEBUG", slog.LevelDebug},
+		{"Debug", slog.LevelDebug},
+		{"info", slog.LevelInfo},
+		{"INFO", slog.LevelInfo},
+		{"Info", slog.LevelInfo},
+		{"warn", slog.LevelWarn},
+		{"WARN", slog.LevelWarn},
+		{"warning", slog.LevelWarn},
+		{"WARNING", slog.LevelWarn},
+		{"error", slog.LevelError},
+		{"ERROR", slog.LevelError},
+		{"Error", slog.LevelError},
+		{"", slog.LevelInfo},           // empty defaults to info
+		{"invalid", slog.LevelInfo},    // invalid defaults to info
+		{"verbose", slog.LevelInfo},    // unknown defaults to info
+		{"trace", slog.LevelInfo},      // unknown defaults to info
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ParseLogLevel(tt.input)
+			if got != tt.want {
+				t.Errorf("ParseLogLevel(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestModuleBasePath(t *testing.T) {
 	// moduleBasePath should be set during init
 	if moduleBasePath == "" {

@@ -105,8 +105,18 @@ func New(version string, opts ...Option) *App {
 func (a *App) Initialize() error {
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 
-	// Set up persistent application logging
-	cleanup, err := logging.SetupAppLog()
+	// Try to load config early to get log level (before logging is set up)
+	// If config doesn't exist or fails to load, we'll use default log level
+	var logLevel slog.Level = slog.LevelInfo
+	if exists, _ := config.ConfigExists(); exists {
+		if cfg, err := config.Load(); err == nil {
+			logLevel = logging.ParseLogLevel(cfg.LogLevel)
+			a.cfg = cfg
+		}
+	}
+
+	// Set up persistent application logging with configured level
+	cleanup, err := logging.SetupAppLog(logLevel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not setup app log: %v\n", err)
 	} else {
@@ -135,7 +145,7 @@ func (a *App) Initialize() error {
 	// macOS: Prompt for Full Disk Access if not already granted
 	a.handleMacOSFirstRun()
 
-	// Check for first run
+	// Check for first run (config may already be loaded above for log level)
 	exists, err := config.ConfigExists()
 	if err != nil {
 		slog.Error("Error checking config", "error", err)
@@ -146,8 +156,8 @@ func (a *App) Initialize() error {
 		if err := a.handleFirstRun(); err != nil {
 			slog.Error("Error during first run setup", "error", err)
 		}
-	} else {
-		// Load existing config
+	} else if a.cfg == nil {
+		// Config exists but wasn't loaded yet (shouldn't happen, but handle it)
 		a.cfg, err = config.Load()
 		if err != nil {
 			slog.Error("Error loading config", "error", err)

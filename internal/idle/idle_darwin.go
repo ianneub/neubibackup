@@ -67,15 +67,21 @@ int64_t getIdleTimeNanoseconds() {
 */
 import "C"
 
-import "time"
+import (
+	"log/slog"
+	"time"
+)
 
 // getIdleTime returns the duration since the last user input on macOS.
 // Uses IOKit to query the HIDIdleTime property from IOHIDSystem.
 func getIdleTime() time.Duration {
 	ns := C.getIdleTimeNanoseconds()
 	if ns < 0 {
+		slog.Error("Failed to get idle time from IOKit", "error", "getIdleTimeNanoseconds returned -1")
 		// Error: assume user is active (fail-safe)
 		return 0
 	}
-	return time.Duration(ns)
+	idleTime := time.Duration(ns)
+	slog.Debug("Got idle time from IOKit", "idle_time", idleTime)
+	return idleTime
 }

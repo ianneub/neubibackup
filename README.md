@@ -61,6 +61,9 @@ Configuration is stored in `~/neubibackup/config.yaml`. Here's a complete exampl
 ```yaml
 version: 1
 
+# Log verbosity: debug, info, warn, error (default: info)
+# log_level: "info"
+
 # When to run daily backups (24-hour format)
 schedule:
   time: "02:00"

@@ -103,6 +103,22 @@ func (w *rotatingWriter) Close() error {
 // appLogWriter is the rotating writer instance
 var appLogWriter *rotatingWriter
 
+// ParseLogLevel converts a string log level to slog.Level.
+// Valid values are: debug, info, warn, warning, error.
+// Invalid or empty values default to slog.LevelInfo.
+func ParseLogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 // replaceAttr converts absolute source paths to relative paths.
 func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == slog.SourceKey {
@@ -160,10 +176,10 @@ func (h *splitHandler) WithGroup(name string) slog.Handler {
 
 // SetupAppLog configures application-wide logging to a persistent file.
 // The log file automatically rotates when it exceeds 1MB, keeping one backup.
-// All log messages go to the file. Messages below Error level also go to stdout,
-// while Error and above go to stderr.
+// All log messages at or above the specified level go to the file.
+// Messages below Error level also go to stdout, while Error and above go to stderr.
 // Returns a cleanup function that should be called when the app exits.
-func SetupAppLog() (cleanup func(), err error) {
+func SetupAppLog(level slog.Level) (cleanup func(), err error) {
 	appDir, err := config.GetAppDir()
 	if err != nil {
 		return nil, fmt.Errorf("get app dir: %w", err)
@@ -200,6 +216,7 @@ func SetupAppLog() (cleanup func(), err error) {
 
 	handlerOpts := &slog.HandlerOptions{
 		AddSource:   true,
+		Level:       level,
 		ReplaceAttr: replaceAttr,
 	}
 

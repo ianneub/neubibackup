@@ -3,6 +3,7 @@
 package idle
 
 import (
+	"log/slog"
 	"syscall"
 	"time"
 	"unsafe"
@@ -27,8 +28,9 @@ func getIdleTime() time.Duration {
 	var lii lastInputInfo
 	lii.cbSize = uint32(unsafe.Sizeof(lii))
 
-	ret, _, _ := procGetLastInputInfo.Call(uintptr(unsafe.Pointer(&lii)))
+	ret, _, err := procGetLastInputInfo.Call(uintptr(unsafe.Pointer(&lii)))
 	if ret == 0 {
+		slog.Error("Failed to get last input info from Windows API", "error", err)
 		// Error: assume user is active (fail-safe)
 		return 0
 	}
@@ -40,5 +42,7 @@ func getIdleTime() time.Duration {
 	currentTick := uint32(tickCount)
 	idleMs := currentTick - lii.dwTime
 
-	return time.Duration(idleMs) * time.Millisecond
+	idleTime := time.Duration(idleMs) * time.Millisecond
+	slog.Debug("Got idle time from Windows API", "idle_time", idleTime)
+	return idleTime
 }

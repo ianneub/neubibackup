@@ -10,6 +10,9 @@ const DefaultConfigTemplate = `# NeubiBackup Configuration
 # Documentation: https://github.com/ianneub/neubibackup
 version: 1
 
+# Log verbosity: debug, info, warn, error (default: info)
+# log_level: "info"
+
 # Schedule settings
 schedule:
   time: "01:00"              # 24-hour format, local time

@@ -734,3 +734,76 @@ backup:
 		})
 	}
 }
+
+func TestLoadFromFile_LogLevel(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		expected string
+	}{
+		{
+			name: "log_level debug",
+			yaml: `version: 1
+log_level: "debug"
+schedule:
+  time: "01:00"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: "debug",
+		},
+		{
+			name: "log_level error",
+			yaml: `version: 1
+log_level: "error"
+schedule:
+  time: "01:00"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: "error",
+		},
+		{
+			name: "log_level not set (empty string)",
+			yaml: `version: 1
+schedule:
+  time: "01:00"
+repository:
+  path: "/backup/repo"
+  password: "secret"
+backup:
+  paths:
+    - /home/user
+`,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+
+			if err := os.WriteFile(configPath, []byte(tt.yaml), 0600); err != nil {
+				t.Fatalf("Failed to write test config: %v", err)
+			}
+
+			cfg, err := LoadFromFile(configPath)
+			if err != nil {
+				t.Fatalf("LoadFromFile() error = %v", err)
+			}
+
+			if cfg.LogLevel != tt.expected {
+				t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, tt.expected)
+			}
+		})
+	}
+}

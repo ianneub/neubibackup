@@ -11,6 +11,8 @@ import (
 type Config struct {
 	Version int `yaml:"version"`
 
+	LogLevel string `yaml:"log_level"` // debug, info, warn, error (default: info)
+
 	Schedule ScheduleConfig `yaml:"schedule"`
 
 	Repository RepositoryConfig `yaml:"repository"`

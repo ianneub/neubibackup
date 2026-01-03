@@ -75,10 +75,9 @@ type PushoverConfig struct {
 
 // TailscaleConfig defines Tailscale network settings for accessing private repositories.
 type TailscaleConfig struct {
-	Enabled  bool     `yaml:"enabled"`   // Enable Tailscale connectivity
-	AuthKey  string   `yaml:"auth_key"`  // Tailscale auth key (tskey-auth-xxx) or OAuth client secret (tskey-client-xxx)
-	Hostname string   `yaml:"hostname"`  // Node name in tailnet (defaults to "neubibackup")
-	Tags     []string `yaml:"tags"`      // ACL tags to advertise (required for OAuth client secrets)
+	Enabled  bool   `yaml:"enabled"`   // Enable Tailscale connectivity
+	AuthKey  string `yaml:"auth_key"`  // Tailscale auth key (tskey-auth-xxx or reusable key)
+	Hostname string `yaml:"hostname"`  // Node name in tailnet (defaults to "neubibackup")
 }
 
 // Load reads the config from the default config file.

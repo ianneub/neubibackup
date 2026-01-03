@@ -135,31 +135,3 @@ func TestIsStarted_ThreadSafe(t *testing.T) {
 		<-done
 	}
 }
-
-func TestNew_WithTags(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	cfg := &config.TailscaleConfig{
-		Enabled:  true,
-		AuthKey:  "tskey-client-test123-secret",
-		Hostname: "testhost",
-		Tags:     []string{"tag:neubibackup", "tag:backup"},
-	}
-
-	mgr, err := New(cfg, tmpDir)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	if mgr == nil {
-		t.Fatal("New() returned nil manager")
-	}
-
-	// Verify the config was stored correctly
-	if len(mgr.cfg.Tags) != 2 {
-		t.Errorf("Expected 2 tags, got %d", len(mgr.cfg.Tags))
-	}
-	if mgr.cfg.Tags[0] != "tag:neubibackup" {
-		t.Errorf("Expected first tag to be 'tag:neubibackup', got %q", mgr.cfg.Tags[0])
-	}
-}

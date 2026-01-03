@@ -131,11 +131,20 @@ pushover:
 
 # Optional: Tailscale integration
 # Enable this to access restic REST servers that are only reachable via Tailscale.
-# The device stays registered in your tailnet - auth key is only needed for initial setup.
+# The device stays registered in your tailnet.
+#
+# Two authentication options:
+# 1. Regular auth key (tskey-auth-xxx) - expires after 90 days max
+# 2. OAuth client secret (tskey-client-xxx) - never expires, requires tags
+#
+# For long-term unattended use, create an OAuth client at:
+# https://login.tailscale.com/admin/settings/trust-credentials
+# with the "auth_keys" scope and assign a tag.
 tailscale:
   enabled: false
-  auth_key: ""               # Get from https://login.tailscale.com/admin/settings/keys
+  auth_key: ""               # Auth key or OAuth client secret
   hostname: "neubibackup"    # Hostname for this device in your tailnet
+  tags: []                   # ACL tags (required for OAuth client secrets, e.g., ["tag:backup"])
 ```
 
 ### Setting Up a Repository

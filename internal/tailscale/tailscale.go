@@ -39,10 +39,11 @@ func New(cfg *config.TailscaleConfig, stateDir string) (*Manager, error) {
 	}
 
 	srv := &tsnet.Server{
-		Dir:       stateDir,
-		Hostname:  hostname,
-		AuthKey:   cfg.AuthKey,
-		Ephemeral: false, // Always non-ephemeral for stable device registration
+		Dir:           stateDir,
+		Hostname:      hostname,
+		AuthKey:       cfg.AuthKey,
+		AdvertiseTags: cfg.Tags,
+		Ephemeral:     false, // Always non-ephemeral for stable device registration
 		Logf: func(format string, args ...any) {
 			slog.Debug(fmt.Sprintf(format, args...), "component", "tailscale")
 		},

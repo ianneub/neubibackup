@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -26,6 +27,18 @@ type Manager struct {
 	proxyAddr string
 }
 
+// hasExistingState checks if the Tailscale state directory contains
+// a valid state file from a previous registration.
+func hasExistingState(stateDir string) bool {
+	statePath := filepath.Join(stateDir, "tailscaled.state")
+	info, err := os.Stat(statePath)
+	if err != nil {
+		return false
+	}
+	// State file must exist and have content
+	return info.Size() > 0
+}
+
 // New creates a new Tailscale manager.
 // The stateDir is where Tailscale will store its persistent state.
 func New(cfg *config.TailscaleConfig, stateDir string) (*Manager, error) {
@@ -38,10 +51,19 @@ func New(cfg *config.TailscaleConfig, stateDir string) (*Manager, error) {
 		hostname = "neubibackup"
 	}
 
+	// Only use auth key for initial registration.
+	// Once registered, the device state is stored in stateDir and the auth key
+	// is no longer needed. This prevents errors if the auth key expires or is deleted.
+	authKey := cfg.AuthKey
+	if hasExistingState(stateDir) {
+		slog.Debug("Tailscale state exists, skipping auth key", "stateDir", stateDir)
+		authKey = ""
+	}
+
 	srv := &tsnet.Server{
 		Dir:       stateDir,
 		Hostname:  hostname,
-		AuthKey:   cfg.AuthKey,
+		AuthKey:   authKey,
 		Ephemeral: false, // Always non-ephemeral for stable device registration
 		Logf: func(format string, args ...any) {
 			slog.Debug(fmt.Sprintf(format, args...), "component", "tailscale")

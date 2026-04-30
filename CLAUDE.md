@@ -67,6 +67,24 @@ GOOS=windows GOARCH=amd64 go build -o neubibackup.exe .
 GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 ```
 
+### Building/testing in Docker
+
+When `go` isn't installed locally, use the official `golang` image pinned to the version in `go.mod`. **Always set `GOOS` (and `GOARCH`)** to a real target platform — the container is `linux`, but this project has no Linux build (no `restart_linux.go`, `systray` requires GTK, etc.), so a default-Linux build will fail.
+
+```bash
+# Cross-build for macOS arm64 (CGO off to skip GTK/Cocoa deps)
+docker run --rm -v "$PWD:/workspace" -w /workspace \
+  -e GOOS=darwin -e GOARCH=arm64 -e CGO_ENABLED=0 \
+  golang:1.26.2 go build ./...
+
+# Cross-build for Windows
+docker run --rm -v "$PWD:/workspace" -w /workspace \
+  -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 \
+  golang:1.26.2 go build ./...
+```
+
+`CGO_ENABLED=0` skips packages that need a C toolchain (`internal/idle`, `internal/network`, `internal/tray`); use it for sanity-checking deps and platform-portable code, then rely on CI for full CGO builds.
+
 ## Platform Notes
 
 ### macOS
@@ -100,6 +118,18 @@ GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 go test ./...      # Run all tests
 go test -v ./...   # Run with verbose output
 ```
+
+#### In Docker
+
+When running tests via the `golang` Docker image, you must set `GOOS` (and `GOARCH`) — see the build-in-Docker note above for why. CGO-dependent packages (`internal/idle`, `internal/network`, `internal/tray`) and the `internal/updater` package (no `restart_linux.go`) won't build under Linux defaults. Cross-test the portable packages like this:
+
+```bash
+docker run --rm -v "$PWD:/workspace" -w /workspace \
+  -e GOOS=darwin -e GOARCH=arm64 -e CGO_ENABLED=0 \
+  golang:1.26.2 go test ./internal/config/... ./internal/scheduler/... ./internal/tailscale/...
+```
+
+For full coverage (including CGO + platform-specific code paths), rely on CI on macOS/Windows runners.
 
 Tests use the `NEUBIBACKUP_APP_DIR` environment variable (set via `TestMain` in test files) to redirect data to temp directories, ensuring tests never touch the real `~/neubibackup/` or `.dev-data/` directories.
 

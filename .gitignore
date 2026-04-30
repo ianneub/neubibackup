@@ -36,3 +36,6 @@ __debug_bin*
 
 # macOS app bundle for testing
 NeubiBackup.app/
+
+# Claude Code local settings
+.claude/settings.local.json

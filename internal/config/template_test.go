@@ -122,7 +122,6 @@ func TestDefaultConfigTemplate_HasCommonExcludes(t *testing.T) {
 	commonExcludes := []string{
 		".DS_Store",
 		"node_modules",
-		".git",
 		"__pycache__",
 	}
 

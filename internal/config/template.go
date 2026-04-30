@@ -56,7 +56,6 @@ backup:
     - "*.tmp"
     - ".DS_Store"
     - "node_modules"
-    - ".git"
     - "__pycache__"
   exclude_file: ""           # Optional path to exclude patterns file
 

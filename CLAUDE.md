@@ -4,7 +4,7 @@ Cross-platform backup scheduler wrapping restic.
 
 ## Tech Stack
 
-- Go 1.25+ with `github.com/getlantern/systray` for tray icon
+- Go 1.26+ with `github.com/getlantern/systray` for tray icon
 - Embedded restic 0.18.1 binary via `//go:embed`
 - YAML config via `gopkg.in/yaml.v3`
 - `github.com/emersion/go-autostart` for launch at login

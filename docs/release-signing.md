@@ -36,7 +36,7 @@ ad-hoc signing — nothing here applies.
 - **Common Name:** `NeubiBackup Code Signing`
 - **Type:** RSA 2048, self-signed root, code-signing EKU
 - **Validity:** 100 years from generation (issued 2026-05-09, expires 2126-04-15)
-- **SHA-1 fingerprint:** `5903AB618F53CE6B2A093DD33A7FB2CAD2B012A3`
+- **SHA-1 fingerprint:** `0B26B3E0B82116DF2A2FACF79269F30900DC5DA6`
 
 If you ever rebuild the cert, replace the SHA-1 above and warn users:
 the next release will trigger a one-time keychain prompt.

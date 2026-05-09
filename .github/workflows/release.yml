@@ -155,8 +155,17 @@ jobs:
             exit 1
           fi
 
+          # Diagnostic: confirm the password reached us intact. The
+          # length and SHA-256 are safe to log; the password itself
+          # never appears in output. If this drifts from the local
+          # values recorded by the maintainer at upload time, the
+          # secret is being mangled in transit.
+          echo "P12_PASSWORD length: $(printf '%s' "$P12_PASSWORD" | wc -c | tr -d ' ')"
+          echo "P12_PASSWORD sha256: $(printf '%s' "$P12_PASSWORD" | shasum -a 256 | cut -d' ' -f1)"
+
           # Write the .p12 to a temporary file.
           echo "$P12_BASE64" | base64 --decode > /tmp/codesign.p12
+          echo "p12 size on disk: $(wc -c < /tmp/codesign.p12 | tr -d ' ') bytes"
 
           # Create a dedicated build keychain so we don't pollute the
           # runner's defaults.

@@ -22,6 +22,10 @@ inherits access.
   `ErrUnsupported` on non-darwin/non-windows platforms so dev cross-builds stay
   green.
 - Migrating existing users. New mode is opt-in via config.
+- **Changes to `.github/workflows/release.yml` to switch from ad-hoc
+  signing to Developer ID signing + notarization.** Tracked separately and
+  out of scope for this work. See "Assumptions" below for what this design
+  takes as given.
 
 ## Background
 
@@ -45,10 +49,38 @@ to the item's ACL — not neubibackup. Any subsequent process invoking
 session-gated and at-rest only, not app-scoped.
 
 To get app-scoped access on macOS, neubibackup must call `Security.framework`
-APIs directly so the ACL binds to neubibackup's own designated requirement.
+APIs directly so the ACL binds to neubibackup's own designated requirement
+(DR). For that DR to be **stable across releases** — so users approve once
+and stay approved through future auto-updates — the binary needs to be signed
+with a stable identity (Apple Developer ID), not ad-hoc.
+
 Windows Credential Manager has no per-app ACL; the protection there is DPAPI
 at rest plus login-session gating, which we get for free by using the Win32
 Credential Manager API.
+
+## Assumptions
+
+This design assumes — but does **not** itself implement — that a future
+release-workflow change moves macOS builds from ad-hoc signing
+(`codesign --sign -`) to **Developer ID Application** signing with the
+hardened runtime and notarization. Specifically:
+
+- macOS releases will be signed with a stable certificate identity
+  (`Developer ID Application: <Org> (<TeamID>)`), giving every release the
+  same designated requirement.
+- The `creativeprojects/go-selfupdate` flow will continue to work because
+  every published artifact carries a matching, notarized signature.
+
+The keychain feature **functions correctly under ad-hoc signing too** — the
+`Security.framework` calls succeed, the ACL is just bound to the current
+binary's cdhash. The practical consequence on ad-hoc builds: the user gets a
+Keychain prompt the first time *each new build* of neubibackup tries to read
+the password, because the cdhash (and therefore the DR) changes every build.
+Approving once per dev rebuild or once per ad-hoc release is workable for
+testing this feature in development, but it is not the intended end-user
+experience. Documentation will note this and recommend that users wait for
+the signed-release rollout before opting into `use_keychain: true` if they
+care about silent operation. No code branches on signing status.
 
 ## Design
 
@@ -285,18 +317,32 @@ Update `README.md`:
   `set-password` subcommand.
 - Tray menu section: list the two new entries.
 - Troubleshooting:
-  - "Password prompts after rebuilding from source" — code-signature change,
-    re-run `set-password`.
+  - "macOS prompts on every update" — note this is expected on ad-hoc
+    releases (current state) and resolves once the project ships
+    Developer-ID-signed releases. Recommend `password_command` in the
+    interim if silent operation matters.
+  - "Password prompt after rebuilding from source" — code-signature change,
+    click "Always Allow" once or re-run `set-password`.
   - "Keychain not available on Linux" — by design.
   - macOS: explicit comparison with `password_command: security ...` and why
-    `use_keychain` is preferred.
+    `use_keychain` is preferred (assuming a signed release).
 
 ## Risks / Open Questions
 
-- **Code-signature stability.** Dev builds (unsigned ad-hoc) and signed release
-  builds have different designated requirements, so the keychain ACL doesn't
-  carry across. Documented; users re-run `set-password` after upgrading.
-  Acceptable trade-off for app-scoped security.
+- **Pre-signing UX.** Until the release workflow switches to Developer ID
+  signing, every ad-hoc release has a different cdhash and therefore a
+  different DR. Users opting into `use_keychain: true` on ad-hoc releases will
+  see a Keychain prompt at every auto-update. README will warn about this
+  and recommend either waiting for the signed-release rollout or sticking
+  with `password_command` in the meantime. The feature is shipped now so the
+  signed-release rollout has nothing to integrate later — it just becomes
+  better.
+- **One-time prompt at the signing cutover.** Users who set the password on
+  the last ad-hoc release will get one final prompt on the first signed
+  release (cdhash → Team-ID-based DR transition). After they click
+  "Always Allow" once on the signed binary, future signed releases are
+  silent. Documented in the release notes for whichever version flips the
+  signing.
 - **`keybase/go-keychain` maintenance.** Active enough for our needs (used by
   Keybase, 1Password CLI, others). If it stagnates, the wrapper surface is
   small (~3 calls); we can replace with a thin direct cgo binding.
@@ -315,3 +361,6 @@ Update `README.md`:
 - GUI-based password change without going through the tray (e.g., a settings
   window). The tray prompt is sufficient.
 - Linux Secret Service support.
+- **Release-workflow changes for Developer ID signing + notarization.** The
+  feature ships first; the signing workflow lands separately when the Apple
+  developer-account work is finished.

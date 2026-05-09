@@ -300,6 +300,28 @@ func TestStatusLineForError(t *testing.T) {
 	})
 }
 
+func TestApplyPasswordMenuStateEnabled(t *testing.T) {
+	var enabled bool
+	m := &Menu{
+		cfg: MenuConfig{
+			UseKeychain: func() bool { return enabled },
+		},
+		// mSetPassword / mClearPassword left nil — applyPasswordMenuState
+		// must not panic on nil items.
+	}
+
+	enabled = false
+	m.applyPasswordMenuState() // must not panic on nil items
+
+	enabled = true
+	m.applyPasswordMenuState() // must not panic on nil items
+}
+
+func TestMenuConfigUseKeychainNilSafe(t *testing.T) {
+	m := &Menu{cfg: MenuConfig{UseKeychain: nil}}
+	m.applyPasswordMenuState() // must not panic when getter is nil
+}
+
 func TestNextBackupMenuText(t *testing.T) {
 	future := time.Now().Add(2 * time.Hour)
 	provider := &mockScheduleProvider{next: future}

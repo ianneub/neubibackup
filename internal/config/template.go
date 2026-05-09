@@ -48,6 +48,12 @@ repository:
   # Windows Credential Manager example:
   # password_command: "powershell -Command \"(Get-StoredCredential -Target neubibackup).GetNetworkCredential().Password\""
 
+  # Or use the OS keychain (macOS Keychain / Windows Credential Manager):
+  # Recommended for desktop installs. Set use_keychain: true and run
+  # neubibackup set-password (CLI) or use the tray menu's
+  # "Set repository password..." item to store the password.
+  # use_keychain: true
+
 # What to backup
 backup:
   paths:

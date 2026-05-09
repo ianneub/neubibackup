@@ -19,6 +19,10 @@ var application *app.App
 var instanceLock *singleinstance.Lock
 
 func main() {
+	if handled, rc := dispatchPasswordCmd(os.Args); handled {
+		os.Exit(rc)
+	}
+
 	// Acquire single instance lock before starting
 	var err error
 	instanceLock, err = singleinstance.Acquire()

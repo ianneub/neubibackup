@@ -11,6 +11,7 @@ A simple system tray application that automatically backs up your files using [r
 - **Retry with backoff** - Automatically retries failed backups (up to 5 attempts)
 - **System tray interface** - Runs quietly in the background with status at a glance
 - **Progress display** - See real-time progress during backups
+- **Native OS keychain integration** - Store the restic password securely in macOS Keychain or Windows Credential Manager
 - **Monitoring integrations** - Optional healthchecks.io and Pushover notifications
 - **No restic installation required** - Restic is bundled with the app
 - **Automatic updates** - Updates are downloaded and applied silently in the background
@@ -144,6 +145,34 @@ tailscale:
   hostname: "neubibackup"    # Hostname for this device in your tailnet
 ```
 
+### Storing the password in the OS keychain
+
+Set `use_keychain: true` in `repository`, leaving the other password fields empty:
+
+```yaml
+repository:
+  path: "rest:https://user:pass@backup.example.com/repo"
+  use_keychain: true
+```
+
+Then store the password once. From a terminal:
+
+```bash
+neubibackup set-password
+```
+
+Or open the tray menu and click **Set repository password…**.
+
+The password is stored in the macOS Keychain (under service `com.neubibackup.repository`) or Windows Credential Manager (target `com.neubibackup.repository:<repo path>`). NeubiBackup reads it on every backup; you don't put it in `config.yaml` or any file.
+
+To remove the stored password, run `neubibackup clear-password` or use the **Clear repository password** tray item.
+
+#### Why prefer this over `password_command: "security ..."` on macOS?
+
+`password_command: security find-generic-password -s neubibackup -w` works, but the keychain ACL on the entry is bound to `/usr/bin/security`. Once you click "Always Allow" the first time, *any* process on your machine that runs `security` reads the password without prompting.
+
+With `use_keychain: true`, NeubiBackup creates and reads the keychain entry through `Security.framework` directly, so the ACL binds to NeubiBackup's own code-signing identity. Other tools (including `/usr/bin/security`) get a fresh prompt. Releases are signed with a stable cert (see `docs/release-signing.md`) so the ACL stays valid across auto-updates.
+
 ### Migrating from v1 to v2
 
 NeubiBackup v2 replaces the `schedule.time` field with the more flexible `schedule.cron`. If you upgrade from v1 you must update your `config.yaml` once:
@@ -195,6 +224,8 @@ Click the tray icon to access:
 - **Backup Now** - Start an immediate backup (becomes "Stop Backup" while running)
 - **Open Config File** - Edit your configuration
 - **Open Logs Folder** - View backup logs
+- **Set repository password…** - Open a system dialog to store the restic password in the OS keychain. Only enabled when `use_keychain: true`.
+- **Clear repository password** - Remove the stored keychain entry. Only enabled when `use_keychain: true`.
 - **Start at Login** - Toggle automatic startup
 - **Check for Updates** - Check for and install new versions
 - **Version** - Shows current app and restic versions
@@ -288,6 +319,14 @@ If "Start at Login" isn't working:
 1. Open Task Scheduler (search for it in the Start menu)
 2. Look for "NeubiBackup" task in the Task Scheduler Library
 3. If missing, toggle the "Start at Login" option off and on in the tray menu
+
+### macOS prompts for keychain access after rebuilding from source
+
+Local `go build` produces ad-hoc-signed binaries whose code-signing hash differs from the released app. The Keychain ACL is bound to that hash, so a fresh build looks like a different program. Either click **Always Allow** once for that build, or re-run `neubibackup set-password`. Released versions don't have this problem because they all share a stable signing cert.
+
+### Keychain integration is not available on Linux
+
+`use_keychain` is implemented on macOS and Windows only. On Linux, NeubiBackup falls back to `password`, `password_file`, or `password_command`.
 
 ## Automatic Updates
 

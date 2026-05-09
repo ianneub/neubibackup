@@ -5,10 +5,13 @@ go 1.26.2
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/creativeprojects/go-selfupdate v1.5.2
+	github.com/danieljoos/wincred v1.2.3
 	github.com/emersion/go-autostart v0.0.0-20250403115856-34830d6457d2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getlantern/systray v1.2.2
+	github.com/keybase/go-keychain v0.0.1
 	github.com/robfig/cron/v3 v3.0.1
+	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	tailscale.com v1.96.5
 )
@@ -93,8 +96,7 @@ require (
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/term v0.38.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect

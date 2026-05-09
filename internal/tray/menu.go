@@ -65,6 +65,19 @@ type MenuConfig struct {
 	OnUpdateClick  func()
 	OnVersionClick func()
 	OnQuit         func()
+
+	// UseKeychain reports whether the active config has use_keychain: true.
+	// When false, the password menu items are disabled.
+	UseKeychain func() bool
+
+	// OnSetPassword is invoked when the user clicks "Set repository
+	// password…". Implementations should pop the password dialog and write
+	// the result to the keychain.
+	OnSetPassword func()
+
+	// OnClearPassword is invoked when the user clicks "Clear repository
+	// password".
+	OnClearPassword func()
 }
 
 // Menu manages the system tray menu.
@@ -78,6 +91,8 @@ type Menu struct {
 	mStopBackup   *systray.MenuItem
 	mAutostart    *systray.MenuItem
 	mUpdateStatus *systray.MenuItem
+	mSetPassword  *systray.MenuItem
+	mClearPassword *systray.MenuItem
 }
 
 // NewMenu creates and initializes the system tray menu.
@@ -131,6 +146,11 @@ func (m *Menu) setup() {
 
 	// Open App Log
 	mOpenAppLog := systray.AddMenuItem("Open App Log", "View application log")
+
+	// Password management (only meaningful when use_keychain is enabled)
+	m.mSetPassword = systray.AddMenuItem("Set repository password…", "Store the restic repository password in the OS keychain")
+	m.mClearPassword = systray.AddMenuItem("Clear repository password", "Remove the stored repository password from the OS keychain")
+	m.applyPasswordMenuState()
 
 	systray.AddSeparator()
 
@@ -201,6 +221,16 @@ func (m *Menu) eventLoop(mOpenConfig, mOpenLogs, mOpenAppLog, mAbout, mQuit *sys
 				m.cfg.OnVersionClick()
 			}
 
+		case <-m.mSetPassword.ClickedCh:
+			if m.cfg.OnSetPassword != nil {
+				m.cfg.OnSetPassword()
+			}
+
+		case <-m.mClearPassword.ClickedCh:
+			if m.cfg.OnClearPassword != nil {
+				m.cfg.OnClearPassword()
+			}
+
 		case <-mQuit.ClickedCh:
 			if m.cfg.OnQuit != nil {
 				m.cfg.OnQuit()
@@ -228,6 +258,26 @@ func (m *Menu) toggleAutostart() {
 	} else {
 		m.mAutostart.Uncheck()
 		slog.Info("Start at Login: disabled")
+	}
+}
+
+// applyPasswordMenuState enables/disables the password menu items based
+// on whether the config has use_keychain: true.
+func (m *Menu) applyPasswordMenuState() {
+	enabled := m.cfg.UseKeychain != nil && m.cfg.UseKeychain()
+	if m.mSetPassword != nil {
+		if enabled {
+			m.mSetPassword.Enable()
+		} else {
+			m.mSetPassword.Disable()
+		}
+	}
+	if m.mClearPassword != nil {
+		if enabled {
+			m.mClearPassword.Enable()
+		} else {
+			m.mClearPassword.Disable()
+		}
 	}
 }
 
@@ -361,5 +411,6 @@ func (m *Menu) RefreshOnConfigChange() {
 			m.mBackupNow.Enable()
 		}
 	}
+	m.applyPasswordMenuState()
 	m.UpdateStatus()
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"neubibackup/internal/config"
+	"neubibackup/internal/keychain"
 )
 
 // Retry configuration
@@ -87,7 +88,11 @@ func runBackupOnce(ctx context.Context, cfg *config.Config, logWriter io.Writer,
 	configureCmd(cmd)
 
 	// Set environment
-	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
+	envExtra, envErr := buildEnv(cfg, proxyAddr, defaultPasswordSource)
+	if envErr != nil {
+		return envErr
+	}
+	cmd.Env = append(os.Environ(), envExtra...)
 
 	// Capture output - wrap with progress writer if callback provided
 	var stdoutWriter io.Writer = logWriter
@@ -177,15 +182,36 @@ func buildRepoArgs(cfg *config.Config) []string {
 	return args
 }
 
-func buildEnv(cfg *config.Config, proxyAddr string) []string {
+// passwordSource abstracts where we get the repository password from
+// when use_keychain is true. The default reads from the OS keychain;
+// tests inject a fake.
+type passwordSource interface {
+	Get(account string) (string, error)
+}
+
+type keychainSource struct{}
+
+func (keychainSource) Get(account string) (string, error) {
+	return keychain.Get(account)
+}
+
+// defaultPasswordSource is overridable by tests via package init or by
+// future plumbing if a non-keychain backend is added.
+var defaultPasswordSource passwordSource = keychainSource{}
+
+func buildEnv(cfg *config.Config, proxyAddr string, src passwordSource) ([]string, error) {
 	var env []string
 
-	// Set RESTIC_REPOSITORY if not using -r flag
-	// (we use -r flag, but setting env doesn't hurt)
 	env = append(env, "RESTIC_REPOSITORY="+cfg.Repository.Path)
 
-	// Set password via environment if using direct password
-	if cfg.Repository.Password != "" {
+	switch {
+	case cfg.Repository.UseKeychain:
+		pw, err := src.Get(cfg.Repository.Path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: keychain: %v", ErrPasswordFailed, err)
+		}
+		env = append(env, "RESTIC_PASSWORD="+pw)
+	case cfg.Repository.Password != "":
 		env = append(env, "RESTIC_PASSWORD="+cfg.Repository.Password)
 	}
 
@@ -195,7 +221,7 @@ func buildEnv(cfg *config.Config, proxyAddr string) []string {
 		env = append(env, "HTTPS_PROXY=socks5://"+proxyAddr)
 	}
 
-	return env
+	return env, nil
 }
 
 // sanitizeURLForLogging masks passwords in URLs for safe logging.
@@ -305,7 +331,11 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	configureCmd(cmd)
-	cmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
+	envExtra, envErr := buildEnv(cfg, proxyAddr, defaultPasswordSource)
+	if envErr != nil {
+		return envErr
+	}
+	cmd.Env = append(os.Environ(), envExtra...)
 
 	// Capture stderr to detect password errors
 	var stderrBuf bytes.Buffer
@@ -343,7 +373,11 @@ func ensureRepositoryExists(ctx context.Context, cfg *config.Config, logWriter i
 
 	initCmd := exec.CommandContext(ctx, binaryPath, initArgs...)
 	configureCmd(initCmd)
-	initCmd.Env = append(os.Environ(), buildEnv(cfg, proxyAddr)...)
+	envExtra, envErr = buildEnv(cfg, proxyAddr, defaultPasswordSource)
+	if envErr != nil {
+		return envErr
+	}
+	initCmd.Env = append(os.Environ(), envExtra...)
 	initCmd.Stdout = logWriter
 	initCmd.Stderr = logWriter
 

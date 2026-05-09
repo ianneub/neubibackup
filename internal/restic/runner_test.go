@@ -1,7 +1,9 @@
 package restic
 
 import (
+	"errors"
 	"runtime"
+	"strings"
 	"testing"
 
 	"neubibackup/internal/config"
@@ -167,6 +169,25 @@ func TestBuildBackupArgs(t *testing.T) {
 				"/home/user/Documents",
 				"/home/user/Pictures",
 				"/etc",
+			},
+		},
+		{
+			name: "with use_keychain",
+			cfg: &config.Config{
+				Repository: config.RepositoryConfig{
+					Path:        "/backup/repo",
+					UseKeychain: true,
+				},
+				Backup: config.BackupConfig{
+					Paths: []string{"/home"},
+				},
+			},
+			contains: []string{
+				"-r", "/backup/repo",
+			},
+			excludes: []string{
+				"--password-file",
+				"--password-command",
 			},
 		},
 	}
@@ -372,7 +393,10 @@ func TestBuildEnv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := buildEnv(tt.cfg, tt.proxyAddr)
+			env, err := buildEnv(tt.cfg, tt.proxyAddr, fakePasswordSource{})
+			if err != nil {
+				t.Fatalf("buildEnv: %v", err)
+			}
 
 			// Convert to map for easier checking
 			envMap := make(map[string]string)
@@ -643,4 +667,69 @@ func TestSanitizeArgsForLogging(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildEnvUseKeychain(t *testing.T) {
+	cfg := &config.Config{
+		Repository: config.RepositoryConfig{
+			Path:        "/backup/repo",
+			UseKeychain: true,
+		},
+	}
+
+	env, err := buildEnv(cfg, "", fakePasswordSource{pw: "from-keychain"})
+	if err != nil {
+		t.Fatalf("buildEnv: %v", err)
+	}
+
+	var gotRepo, gotPw string
+	var sawPw bool
+	for _, e := range env {
+		if strings.HasPrefix(e, "RESTIC_REPOSITORY=") {
+			gotRepo = strings.TrimPrefix(e, "RESTIC_REPOSITORY=")
+		}
+		if strings.HasPrefix(e, "RESTIC_PASSWORD=") {
+			gotPw = strings.TrimPrefix(e, "RESTIC_PASSWORD=")
+			sawPw = true
+		}
+	}
+	if gotRepo != "/backup/repo" {
+		t.Errorf("RESTIC_REPOSITORY = %q, want /backup/repo", gotRepo)
+	}
+	if !sawPw {
+		t.Error("RESTIC_PASSWORD missing")
+	}
+	if gotPw != "from-keychain" {
+		t.Errorf("RESTIC_PASSWORD = %q, want from-keychain", gotPw)
+	}
+}
+
+func TestBuildEnvKeychainMissError(t *testing.T) {
+	cfg := &config.Config{
+		Repository: config.RepositoryConfig{
+			Path:        "/backup/repo",
+			UseKeychain: true,
+		},
+	}
+
+	_, err := buildEnv(cfg, "", fakePasswordSource{err: errors.New("not found")})
+	if err == nil {
+		t.Fatal("buildEnv: nil error, want ErrPasswordFailed")
+	}
+	if !errors.Is(err, ErrPasswordFailed) {
+		t.Errorf("buildEnv error = %v, want errors.Is ErrPasswordFailed", err)
+	}
+}
+
+// fakePasswordSource is a configurable source for runner tests.
+type fakePasswordSource struct {
+	pw  string
+	err error
+}
+
+func (f fakePasswordSource) Get(account string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.pw, nil
 }

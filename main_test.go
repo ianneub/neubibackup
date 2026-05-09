@@ -317,6 +317,77 @@ func TestConfigValidation(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "valid config with use_keychain",
+			cfg: config.Config{
+				Version: 2,
+				Repository: config.RepositoryConfig{
+					Path:        "/backup/repo",
+					UseKeychain: true,
+				},
+				Backup: config.BackupConfig{
+					Paths: []string{"/home"},
+				},
+				Schedule: config.ScheduleConfig{
+					Cron: "@every 24h",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "rejects use_keychain plus password",
+			cfg: config.Config{
+				Version: 2,
+				Repository: config.RepositoryConfig{
+					Path:        "/backup/repo",
+					Password:    "secret",
+					UseKeychain: true,
+				},
+				Backup: config.BackupConfig{
+					Paths: []string{"/home"},
+				},
+				Schedule: config.ScheduleConfig{
+					Cron: "@every 24h",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "rejects use_keychain plus password_file",
+			cfg: config.Config{
+				Version: 2,
+				Repository: config.RepositoryConfig{
+					Path:         "/backup/repo",
+					PasswordFile: "/tmp/p",
+					UseKeychain:  true,
+				},
+				Backup: config.BackupConfig{
+					Paths: []string{"/home"},
+				},
+				Schedule: config.ScheduleConfig{
+					Cron: "@every 24h",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "rejects password plus password_file",
+			cfg: config.Config{
+				Version: 2,
+				Repository: config.RepositoryConfig{
+					Path:         "/backup/repo",
+					Password:     "x",
+					PasswordFile: "/tmp/p",
+				},
+				Backup: config.BackupConfig{
+					Paths: []string{"/home"},
+				},
+				Schedule: config.ScheduleConfig{
+					Cron: "@every 24h",
+				},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

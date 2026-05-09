@@ -145,15 +145,61 @@ jobs:
           echo "Info.plist created with architecture: ${ARCH_STRING}"
           cat NeubiBackup.app/Contents/Info.plist
 
+      - name: Import code-signing cert
+        env:
+          P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$P12_BASE64" ] || [ -z "$P12_PASSWORD" ]; then
+            echo "ERROR: MACOS_CERT_P12_BASE64 and MACOS_CERT_PASSWORD secrets are required."
+            exit 1
+          fi
+
+          # Write the .p12 to a temporary file.
+          echo "$P12_BASE64" | base64 --decode > /tmp/codesign.p12
+
+          # Create a dedicated build keychain so we don't pollute the
+          # runner's defaults.
+          KCHAIN_PW="ci-keychain-$RANDOM"
+          security create-keychain -p "$KCHAIN_PW" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KCHAIN_PW" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+
+          # Import the cert.
+          security import /tmp/codesign.p12 \
+            -k build.keychain \
+            -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign
+
+          # Allow codesign to use the imported key without an additional
+          # prompt.
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$KCHAIN_PW" build.keychain
+
+          # Wipe the .p12 from disk; it's now resident in the build
+          # keychain only.
+          rm -f /tmp/codesign.p12
+
+          # Show what got imported (cert hash should match the value in
+          # docs/release-signing.md).
+          security find-identity -v -p codesigning build.keychain
+
       - name: Sign app bundle
         run: |
-          # Ad-hoc sign the entire app bundle (sign after copying binary, not before)
-          codesign --force --deep --sign - NeubiBackup.app
+          # Sign with the stable self-signed cert (see docs/release-signing.md).
+          # --deep recursively signs the embedded restic binary first,
+          # then the bundle's main executable, then the bundle.
+          codesign --force --deep \
+            --sign "NeubiBackup Code Signing" \
+            NeubiBackup.app
+
           echo "App bundle signed successfully"
           codesign -dv --verbose=4 NeubiBackup.app
 
-          # Verify the signature
-          codesign --verify --verbose NeubiBackup.app
+          # Verify the full signature chain.
+          codesign --verify --deep --strict --verbose=2 NeubiBackup.app
 
       - name: Create DMG installer
         run: |

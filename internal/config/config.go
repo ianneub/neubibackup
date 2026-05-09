@@ -45,6 +45,7 @@ type RepositoryConfig struct {
 	Password        string `yaml:"password"`         // Password directly (less secure)
 	PasswordFile    string `yaml:"password_file"`    // Path to password file
 	PasswordCommand string `yaml:"password_command"` // Command to get password
+	UseKeychain     bool   `yaml:"use_keychain"`     // Read/write password from OS keychain
 }
 
 // BackupConfig defines what to backup.
@@ -145,8 +146,24 @@ func (c *Config) Validate() error {
 	if c.Repository.Path == "" {
 		return fmt.Errorf("repository.path is required")
 	}
-	if c.Repository.Password == "" && c.Repository.PasswordFile == "" && c.Repository.PasswordCommand == "" {
-		return fmt.Errorf("repository.password, repository.password_file, or repository.password_command is required")
+	sources := 0
+	if c.Repository.Password != "" {
+		sources++
+	}
+	if c.Repository.PasswordFile != "" {
+		sources++
+	}
+	if c.Repository.PasswordCommand != "" {
+		sources++
+	}
+	if c.Repository.UseKeychain {
+		sources++
+	}
+	switch {
+	case sources == 0:
+		return fmt.Errorf("one of repository.password, repository.password_file, repository.password_command, or repository.use_keychain is required")
+	case sources > 1:
+		return fmt.Errorf("exactly one of repository.password, repository.password_file, repository.password_command, or repository.use_keychain may be set")
 	}
 	if len(c.Backup.Paths) == 0 {
 		return fmt.Errorf("backup.paths is required")

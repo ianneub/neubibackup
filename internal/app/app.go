@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"neubibackup/internal/autostart"
 	"neubibackup/internal/backup"
 	"neubibackup/internal/config"
+	"neubibackup/internal/keychain"
 	"neubibackup/internal/logging"
 	"neubibackup/internal/restic"
 	"neubibackup/internal/scheduler"
@@ -194,6 +196,11 @@ func (a *App) Initialize() error {
 		OnUpdateClick:  a.handleUpdateClick,
 		OnVersionClick: a.openProjectWebsite,
 		OnQuit:         a.onQuit,
+		UseKeychain: func() bool {
+			return a.cfg != nil && a.cfg.Repository.UseKeychain
+		},
+		OnSetPassword:   a.handleSetPassword,
+		OnClearPassword: a.handleClearPassword,
 	})
 
 	// Initialize updater and orchestrator
@@ -375,6 +382,43 @@ func (a *App) openAppLog() {
 
 func (a *App) handleUpdateClick() {
 	a.updateOrch.HandleUpdateClick(a.ctx)
+}
+
+// handleSetPassword pops a password dialog and stores the entered value
+// in the OS keychain against the configured repository path.
+func (a *App) handleSetPassword() {
+	if a.cfg == nil || a.cfg.Repository.Path == "" {
+		slog.Warn("Set password requested but no repository configured")
+		return
+	}
+	pw, err := keychain.PromptDialog("NeubiBackup", "Enter the restic repository password:")
+	if err != nil {
+		slog.Info("Set password cancelled or failed", "error", err)
+		return
+	}
+	if err := keychain.Set(a.cfg.Repository.Path, pw); err != nil {
+		slog.Error("Failed to store password in keychain", "error", err)
+		return
+	}
+	slog.Info("Repository password stored in keychain")
+}
+
+// handleClearPassword removes the stored password for the configured
+// repository path. Missing entries are treated as success.
+func (a *App) handleClearPassword() {
+	if a.cfg == nil || a.cfg.Repository.Path == "" {
+		slog.Warn("Clear password requested but no repository configured")
+		return
+	}
+	err := keychain.Delete(a.cfg.Repository.Path)
+	switch {
+	case err == nil:
+		slog.Info("Repository password cleared from keychain")
+	case errors.Is(err, keychain.ErrNotFound):
+		slog.Info("No keychain entry to clear for repository")
+	default:
+		slog.Error("Failed to delete password from keychain", "error", err)
+	}
 }
 
 func (a *App) openProjectWebsite() {

@@ -39,3 +39,6 @@ NeubiBackup.app/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# certs
+docs/signing

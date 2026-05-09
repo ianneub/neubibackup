@@ -5,7 +5,7 @@
 
 ## Summary
 
-Replace the fixed daily-at-`schedule.time` scheduling with a single configurable `schedule.cron` field that accepts either a standard 5-field cron expression (`"0 1 * * *"`, `"*/30 * * * *"`) or a Go-duration descriptor (`"@every 1h"`, `"@every 6h"`). Parsing is delegated to `github.com/robfig/cron/v3`, which natively handles both forms through a single `cron.Schedule` interface. When `cron` is unset, the scheduler defaults to `"@every 24h"` so legacy installs keep running on roughly the same cadence. The existing `schedule.time` field becomes a deprecated no-op kept only so legacy YAML still parses.
+Replace the fixed daily-at-`schedule.time` scheduling with a single configurable `schedule.cron` field that accepts either a standard 5-field cron expression (`"0 1 * * *"`, `"*/30 * * * *"`) or a Go-duration descriptor (`"@every 1h"`, `"@every 6h"`). Parsing is delegated to `github.com/robfig/cron/v3`, which natively handles both forms through a single `cron.Schedule` interface. When `cron` is unset, the scheduler defaults to `"@every 24h"`. The old `schedule.time` field is removed outright. The config schema version bumps from `1` to `2`, and configs that don't match the new version (or that still contain a stale `time:` field) are rejected at load time with a clear migration error. App semver bumps to **v2.0.0** per the project's "MAJOR = incompatible config change" rule in CLAUDE.md.
 
 ## Motivation
 
@@ -22,7 +22,7 @@ Users want backups more frequent than once per day (notably hourly), and some us
 ## Non-goals
 
 - No second-resolution cron (5-field, no seconds field).
-- No automatic config migration that rewrites the user's `config.yaml`. The `time` field is silently ignored with a deprecation log.
+- No automatic config migration that rewrites the user's `config.yaml`. We surface a clear error and let the user update their config by hand.
 - No special UX in the tray for editing the cron expression. Editing is via `config.yaml`, like every other setting.
 
 ## Dependency
@@ -38,21 +38,24 @@ Add to `go.mod` via `go get github.com/robfig/cron/v3`.
 
 ### Config schema
 
-`internal/config/config.go` — `ScheduleConfig` gains a `Cron` field:
+`internal/config/config.go` — `ScheduleConfig` gains a `Cron` field; the `Time` field is removed entirely:
 
 ```go
 type ScheduleConfig struct {
     Cron          string   `yaml:"cron"`            // NEW. Cron expression or "@every <duration>". Default: "@every 24h".
-    Time          string   `yaml:"time"`            // DEPRECATED. Ignored at runtime. Kept for YAML compat.
     Timezone      string   `yaml:"timezone"`
     SkipOnBattery bool     `yaml:"skip_on_battery"`
     AllowedSSIDs  []string `yaml:"allowed_ssids"`
 }
 ```
 
+The top-level `Config.Version` field still exists; the schema version bumps from `1` to `2`. Add a constant `currentConfigVersion = 2` in `config.go` and reference it from `Validate` and the template.
+
 User-facing yaml (new installs):
 
 ```yaml
+version: 2
+
 schedule:
   cron: "@every 24h"        # Cron expression or "@every <duration>". Min gap: 15m.
                             # Examples:
@@ -66,22 +69,49 @@ schedule:
   # allowed_ssids: []
 ```
 
-Legacy yaml (still parses, `time` is ignored with warning):
+A v1 config (or any config containing the removed `schedule.time` field) is rejected — see Validation below.
 
-```yaml
-schedule:
-  time: "01:00"             # deprecated, ignored
+### Validation (`config.Validate` and `LoadFromFile`)
+
+Two new checks, applied in this order:
+
+**1. Schema version check (in `Validate`)**
+
+```go
+if c.Version != currentConfigVersion {
+    return fmt.Errorf(
+        "config.yaml is schema version %d, expected %d. " +
+        "The 'schedule.time' field has been removed in favor of 'schedule.cron' " +
+        "(see README for migration). Update your config and set 'version: %d'.",
+        c.Version, currentConfigVersion, currentConfigVersion)
+}
 ```
 
-### Validation (`config.Validate`)
+A missing/zero `Version` field is treated as v1 and produces the same error.
 
-Replace the `if c.Schedule.Time == ""` requirement with cron-spec validation:
+**2. Strict YAML decoding (in `LoadFromFile`)**
+
+Use `yaml.NewDecoder(...).KnownFields(true)` so any unknown top-level or struct fields produce an error. With the `Time` field removed from the struct, a leftover `schedule.time:` key in the user's YAML produces an error like:
+
+```
+config.yaml: yaml: unmarshal errors:
+  line N: field time not found in type config.ScheduleConfig
+```
+
+This is intentionally pre-Validate so the YAML error itself names the offending field. Wrap the error with a hint pointing the user at the README migration section:
+
+```go
+if err := dec.Decode(&cfg); err != nil {
+    return nil, fmt.Errorf("parsing config file: %w (see README for v2 schema migration)", err)
+}
+```
+
+**3. Cron-spec validation (in `Validate`, after the version check)**
 
 - If `Schedule.Cron` is empty, treat as `"@every 24h"` (no error).
 - If `Schedule.Cron` is set:
   - Must parse via `cron.ParseStandard`. Bad parse → `fmt.Errorf("schedule.cron is not a valid cron expression or @every descriptor: %w", err)`.
   - Must have a minimum gap between consecutive fires of `>= 15 * time.Minute` (see "Min-gap validation" below). Smaller → `fmt.Errorf("schedule.cron fires too frequently: minimum gap is %s, must be at least 15m", minGap)`.
-- `Schedule.Time` is no longer required and is no longer used by the scheduler. If `Schedule.Time != ""`, log once at WARN level on config load: `"schedule.time is deprecated and ignored; backups now use schedule.cron (default \"@every 24h\")"`. The warning is fired from `LoadFromFile` (covers both `Load` and direct loaders, fires once per load), gated on `cfg.Schedule.Time != ""`.
 
 Add a helper that centralizes default + parse + min-gap check, returning both the schedule and the discovered min gap (the latter used for log retention sizing):
 
@@ -222,9 +252,13 @@ Hourly users will produce ~24 logs/day; current retention (the package-level `ma
 
 ### Config template (`internal/config/template.go`)
 
-Replace the `schedule` block:
+Bump `version: 2` at the top of the template and replace the `schedule` block:
 
 ```yaml
+# NeubiBackup Configuration
+# Documentation: https://github.com/ianneub/neubibackup
+version: 2
+
 # Schedule settings
 schedule:
   cron: "@every 24h"       # Cron expression or "@every <duration>". Minimum gap: 15m.
@@ -250,7 +284,7 @@ No tray code changes are required for this feature.
 ### README
 
 - Replace the daily-schedule wording with cron / interval wording.
-- Document the legacy behavior change (`schedule.time` is deprecated, replaced by `schedule.cron`, default behavior is rolling 24h from last success rather than fixed 01:00 wall clock).
+- Document the v1 → v2 migration: bump `version: 2`, replace `schedule.time: "HH:MM"` with `schedule.cron: "<expression>"`, and pick a cron expression or `@every` descriptor.
 - Add a "Backup frequency" subsection covering:
   - Two syntaxes (cron vs `@every`) and when to pick each.
   - The 15-minute minimum gap.
@@ -258,15 +292,18 @@ No tray code changes are required for this feature.
 
 ## Behavior change notes
 
-A user upgrading with only `time: "01:00"` set will, after upgrade:
+This is a **breaking change**. A user upgrading with a v1 config will see the app fail to start (the tray surfaces "Configuration required..." or similar; `app.log` contains the validation error) until they update `config.yaml`.
 
-- Schedule on a rolling 24h cadence keyed off `LastSuccess`, not the 01:00 wall clock.
-- If `LastSuccess` was < 24h ago, the next run fires at `LastSuccess + 24h`. Otherwise it fires on the next 15-min tick.
-- See a `schedule.time is deprecated...` log message in `app.log` on startup.
+Migration steps for the user:
 
-Users who want to keep the old "01:00 daily" behavior can set `cron: "0 1 * * *"`.
+1. Set `version: 2` at the top of `config.yaml`.
+2. Remove `schedule.time: "HH:MM"`.
+3. Add `schedule.cron: "<expression>"`. Choose:
+   - `"@every 24h"` — rolling 24h from last success (closest to the new default).
+   - `"0 H * * *"` — keep the exact old behavior of running at HH:00 every day (e.g. `"0 1 * * *"` for the previous default of 01:00).
+   - `"@every 1h"`, `"@every 6h"`, etc. — sub-daily cadences.
 
-This is the only intentional regression. It is documented in CHANGELOG / release notes.
+The README and CHANGELOG document this migration step-by-step. The app's semver bumps to **v2.0.0** to signal the incompatibility per CLAUDE.md.
 
 ## Testing
 
@@ -274,12 +311,14 @@ All tests live next to the code they cover (`*_test.go`) and use the existing `N
 
 ### `internal/config/config_test.go`
 
-- `Validate` accepts empty `Cron` (defaults to `@every 24h`, no error).
+- `Validate` rejects `Version == 0` and `Version == 1` with a v2 migration message.
+- `Validate` accepts `Version == 2`.
+- `Validate` accepts empty `Cron` (defaults to `@every 24h`, no error) when version is 2.
 - `Validate` accepts `"@every 1h"`, `"@every 30m"`, `"@every 24h"`, `"@every 15m"`.
 - `Validate` accepts cron expressions: `"0 1 * * *"`, `"*/15 * * * *"`, `"0 8,18 * * *"`, `"@daily"`, `"@hourly"`.
-- `Validate` rejects `"@every 10m"` (sub-15m), `"@every 0s"`, `"*/10 * * * *"` (10m gap), `"0,5 * * * *"` (5m gap on the hour boundary), `"* * * * *"`, `"garbage"`, `""` for syntax errors but accepts empty for default.
-- `Validate` does not error when `Time` is empty.
-- `Validate` does not error when `Time` is set (deprecated but harmless).
+- `Validate` rejects `"@every 10m"` (sub-15m), `"@every 0s"`, `"*/10 * * * *"` (10m gap), `"0,5 * * * *"` (5m gap on the hour boundary), `"* * * * *"`, `"garbage"`.
+- `LoadFromFile` returns an error mentioning `time` when given a YAML file containing a `schedule.time:` key (strict-decoding regression guard).
+- `LoadFromFile` returns the v2 migration error when given a v1 YAML file with `version: 1` and no `time:` key.
 - `ParseSchedule` returns the expected min gap: `@every 1h` → 1h; `0 1,2 * * *` → 1h; `0 1 * * *` → 24h; `*/15 * * * *` → 15m.
 - `ParseSchedule` short-circuits within 5ms on `* * * * *` (regression guard).
 
@@ -320,9 +359,9 @@ For tests that need to control "now", inject a clock or use fixed `lastSuccess` 
 ## Files touched
 
 - `go.mod` / `go.sum` — add `github.com/robfig/cron/v3`.
-- `internal/config/config.go` — add `Cron` field, add `ParseSchedule` + `minGapOf`, update `Validate`, emit the `schedule.time` deprecation warning from `LoadFromFile`.
-- `internal/config/template.go` — new schedule block.
-- `internal/config/config_test.go` — new validation + `ParseSchedule` tests.
+- `internal/config/config.go` — add `Cron` field, **drop the `Time` field**, add `currentConfigVersion = 2`, add `ParseSchedule` + `minGapOf`, update `Validate` to enforce schema version, switch `LoadFromFile` to strict YAML decoding (`KnownFields(true)`).
+- `internal/config/template.go` — `version: 2`, new schedule block.
+- `internal/config/config_test.go` — new validation + `ParseSchedule` tests; v1-config rejection test; strict-decoding test for stray `time:` field.
 - `internal/scheduler/scheduler.go` — schedule + minGap cache, rewritten `isBackupDue` and `NextBackupTime`, new `MinGap()` accessor, drop `parseTime`.
 - `internal/scheduler/scheduler_test.go` — replace daily-anchor tests with cron tests.
 - `internal/state/state.go` — drop `HasBackedUpToday*`.
@@ -330,11 +369,13 @@ For tests that need to control "now", inject a clock or use fixed `lastSuccess` 
 - `internal/logging/logging.go` — change `CleanupOldLogs` signature to take a `maxFiles int`, add `RetentionFor(time.Duration) int`.
 - `internal/logging/logging_test.go` — update existing tests for the new signature, add table tests for `RetentionFor`.
 - `internal/app/app.go` — call `logging.CleanupOldLogs(logging.RetentionFor(a.scheduler.MinGap()))` at every existing `CleanupOldLogs` call site.
-- `README.md` — rewrite schedule docs, document upgrade behavior.
+- `README.md` — rewrite schedule docs, add v1 → v2 migration section.
+- `CHANGELOG.md` (or release notes) — document the breaking change and migration steps.
 
 ## Risks and rollback
 
-- **Risk:** users relying on the precise 01:00 wall-clock anchor get a slightly drifting cadence under the new default. *Mitigation:* document in release notes; the rolling cadence is what most users actually want, and users who want the exact old behavior can set `cron: "0 1 * * *"`.
+- **Risk:** every existing user must edit their config on upgrade or the app refuses to start. *Mitigation:* the validation error names the offending field and points at the README migration section; the README/CHANGELOG document the migration step-by-step; this is the explicit reason for the v2 major bump.
 - **Risk:** new dependency (`robfig/cron/v3`). *Mitigation:* widely used (16k+ stars), MIT, no transitive deps that aren't already in the module graph.
 - **Risk:** retention bump for frequent-backup users surprises someone watching disk usage. *Mitigation:* 500-log cap + each log is small.
-- **Rollback:** revert the PR. The `cron` field would simply be ignored by the previous binary; users on legacy `time` keep working.
+- **Risk:** strict YAML decoding (`KnownFields(true)`) rejects future-tolerant configs that contain unknown fields. *Mitigation:* this is intentional for catching `time:` and similar typos; future schema additions are bumps to `currentConfigVersion`.
+- **Rollback:** revert the PR. Existing users would need to revert their `config.yaml` back to v1 form (re-add `schedule.time`, set `version: 1`); document this rollback path in the CHANGELOG entry.

@@ -89,12 +89,15 @@ repository:
   # - Backblaze B2: b2:bucket-name:path/to/repo
   path: "rest:https://user:pass@backup.example.com/repo"
 
-  # Password (choose one method):
+  # Password (pick exactly one):
   password: "your-repository-password"
-  # OR use a file:
+  # OR read from a file:
   # password_file: "/path/to/password-file"
-  # OR use a command (most secure):
+  # OR run a command to fetch the password:
   # password_command: "security find-generic-password -s restic -w"
+  # OR (recommended on macOS/Windows) store in the OS keychain — see
+  # "Storing the password in the OS keychain" below for setup:
+  # use_keychain: true
 
 # What to back up
 backup:

@@ -920,3 +920,158 @@ func TestOptionsAreIndependent(t *testing.T) {
 		t.Error("tooltip callback should not have been called")
 	}
 }
+
+// TestLoadAndValidateConfig_Valid asserts that loadAndValidateConfig sets
+// a.cfg and clears a.configError on success.
+func TestLoadAndValidateConfig_Valid(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("NEUBIBACKUP_APP_DIR", tmp)
+
+	body := []byte(`version: 2
+schedule:
+  cron: "@every 24h"
+repository:
+  path: /repo
+  password: secret
+backup:
+  paths: ["/home"]
+`)
+	if err := os.WriteFile(filepath.Join(tmp, "config.yaml"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := New("test")
+	if err := app.loadAndValidateConfig(); err != nil {
+		t.Fatalf("loadAndValidateConfig() err = %v, want nil", err)
+	}
+	if app.cfg == nil {
+		t.Fatal("a.cfg = nil, want non-nil")
+	}
+	if app.configError != nil {
+		t.Errorf("a.configError = %v, want nil", app.configError)
+	}
+	if got := app.ConfigError(); got != nil {
+		t.Errorf("ConfigError() = %v, want nil", got)
+	}
+}
+
+// TestLoadAndValidateConfig_V1Rejected asserts that a v1 config is rejected
+// with a useful error stored on a.configError, and a.cfg is nil so downstream
+// callers don't act on stale data.
+func TestLoadAndValidateConfig_V1Rejected(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("NEUBIBACKUP_APP_DIR", tmp)
+
+	body := []byte(`version: 1
+schedule:
+  cron: "@every 24h"
+repository:
+  path: /repo
+  password: secret
+backup:
+  paths: ["/home"]
+`)
+	if err := os.WriteFile(filepath.Join(tmp, "config.yaml"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := New("test")
+	err := app.loadAndValidateConfig()
+	if err == nil {
+		t.Fatal("loadAndValidateConfig() expected error for v1 config, got nil")
+	}
+	if app.cfg != nil {
+		t.Error("a.cfg should be nil after a validation failure")
+	}
+	if app.configError == nil {
+		t.Fatal("a.configError should be set after a validation failure")
+	}
+	if got := app.ConfigError(); got == nil || got.Error() != app.configError.Error() {
+		t.Errorf("ConfigError() = %v, want = a.configError", got)
+	}
+}
+
+// TestLoadAndValidateConfig_StrictDecodeRejected asserts that a stray
+// `schedule.time:` field (the v1->v2 trap) shows up in a.configError so the
+// menu can display it.
+func TestLoadAndValidateConfig_StrictDecodeRejected(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("NEUBIBACKUP_APP_DIR", tmp)
+
+	body := []byte(`version: 2
+schedule:
+  cron: "@every 24h"
+  time: "01:00"
+repository:
+  path: /repo
+  password: secret
+backup:
+  paths: ["/home"]
+`)
+	if err := os.WriteFile(filepath.Join(tmp, "config.yaml"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := New("test")
+	if err := app.loadAndValidateConfig(); err == nil {
+		t.Fatal("loadAndValidateConfig() expected error for stray time field, got nil")
+	}
+	if app.cfg != nil {
+		t.Error("a.cfg should be nil after a strict-decode failure")
+	}
+	if app.configError == nil {
+		t.Fatal("a.configError should mention the failure")
+	}
+}
+
+// TestLoadAndValidateConfig_ClearsPreviousError asserts that a successful
+// reload after an error clears a.configError so the menu stops showing the
+// stale message.
+func TestLoadAndValidateConfig_ClearsPreviousError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("NEUBIBACKUP_APP_DIR", tmp)
+	configPath := filepath.Join(tmp, "config.yaml")
+
+	bad := []byte(`version: 1
+schedule:
+  cron: "@every 24h"
+repository:
+  path: /repo
+  password: secret
+backup:
+  paths: ["/home"]
+`)
+	good := []byte(`version: 2
+schedule:
+  cron: "@every 24h"
+repository:
+  path: /repo
+  password: secret
+backup:
+  paths: ["/home"]
+`)
+	if err := os.WriteFile(configPath, bad, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := New("test")
+	if err := app.loadAndValidateConfig(); err == nil {
+		t.Fatal("expected error from v1 config")
+	}
+	if app.configError == nil {
+		t.Fatal("a.configError should be set after first load")
+	}
+
+	if err := os.WriteFile(configPath, good, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.loadAndValidateConfig(); err != nil {
+		t.Fatalf("expected clean reload, got %v", err)
+	}
+	if app.configError != nil {
+		t.Errorf("a.configError = %v, want nil after successful reload", app.configError)
+	}
+	if app.cfg == nil {
+		t.Error("a.cfg should be set after successful reload")
+	}
+}

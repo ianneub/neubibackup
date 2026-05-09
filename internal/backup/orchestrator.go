@@ -44,10 +44,11 @@ type ProgressCallback func(progress restic.BackupProgress)
 type Orchestrator struct {
 	cfg        *config.Config
 	state      *state.State
-	notifier   Notifier
-	tailscale  TailscaleProvider
-	onProgress ProgressCallback
-	location   *time.Location
+	notifier     Notifier
+	tailscale    TailscaleProvider
+	onProgress   ProgressCallback
+	location     *time.Location
+	logRetention int
 }
 
 // OrchestratorOption is a functional option for configuring an Orchestrator.
@@ -78,6 +79,14 @@ func WithProgressCallback(cb ProgressCallback) OrchestratorOption {
 func WithLocation(loc *time.Location) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.location = loc
+	}
+}
+
+// WithLogRetention sets the maximum number of log files to retain after a
+// successful backup. Zero or negative falls back to logging.DefaultMaxLogFiles.
+func WithLogRetention(maxFiles int) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.logRetention = maxFiles
 	}
 }
 
@@ -189,7 +198,7 @@ func (o *Orchestrator) Run(ctx context.Context) Result {
 	o.handleBackupSuccess()
 
 	// Cleanup old logs
-	if err := logging.CleanupOldLogs(); err != nil {
+	if err := logging.CleanupOldLogs(o.logRetention); err != nil {
 		slog.Warn("Log cleanup failed", "error", err)
 	}
 

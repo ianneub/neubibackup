@@ -8,6 +8,7 @@ require (
 	github.com/emersion/go-autostart v0.0.0-20250403115856-34830d6457d2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getlantern/systray v1.2.2
+	github.com/robfig/cron/v3 v3.0.1
 	gopkg.in/yaml.v3 v3.0.1
 	tailscale.com v1.96.5
 )

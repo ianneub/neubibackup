@@ -36,7 +36,7 @@ func TestDefaultConfigTemplate_HasRequiredSections(t *testing.T) {
 func TestDefaultConfigTemplate_HasExamples(t *testing.T) {
 	examples := []string{
 		"rest:https://",    // REST server example
-		"time:",            // Schedule time
+		"cron:",            // Schedule cron
 		"paths:",           // Backup paths
 		"excludes:",        // Excludes
 		"ping_url:",        // Healthchecks URL
@@ -55,7 +55,6 @@ func TestDefaultConfigTemplate_HasHelpfulComments(t *testing.T) {
 	comments := []string{
 		"# NeubiBackup Configuration",
 		"# Documentation:",
-		"# 24-hour format",
 		"# macOS",
 		"# Windows",
 	}
@@ -76,11 +75,11 @@ func TestDefaultConfigTemplate_CanBeLoaded(t *testing.T) {
 	}
 
 	// Verify basic structure
-	if cfg.Version != 1 {
-		t.Errorf("Version = %d, want 1", cfg.Version)
+	if cfg.Version != 2 {
+		t.Errorf("Version = %d, want 2", cfg.Version)
 	}
-	if cfg.Schedule.Time == "" {
-		t.Error("Schedule.Time should not be empty")
+	if cfg.Schedule.Cron == "" {
+		t.Error("Schedule.Cron should not be empty")
 	}
 }
 

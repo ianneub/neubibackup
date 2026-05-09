@@ -1,9 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"time"
 
+	cron "github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -30,7 +33,7 @@ type Config struct {
 
 // ScheduleConfig defines when backups should run.
 type ScheduleConfig struct {
-	Time          string   `yaml:"time"`            // 24-hour format, e.g., "01:00"
+	Cron          string   `yaml:"cron"`            // Cron expression or "@every <duration>". Default: "@every 24h".
 	Timezone      string   `yaml:"timezone"`        // Optional, defaults to system timezone
 	SkipOnBattery bool     `yaml:"skip_on_battery"` // Skip scheduled backups when on battery power
 	AllowedSSIDs  []string `yaml:"allowed_ssids"`   // Only run scheduled backups on these WiFi SSIDs (empty = no restriction)
@@ -97,8 +100,10 @@ func LoadFromFile(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file: %w", err)
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w (see README for v2 schema migration)", err)
 	}
 
 	return &cfg, nil
@@ -127,8 +132,16 @@ func (c *Config) SaveToFile(path string) error {
 	return nil
 }
 
-// Validate checks if the config has the minimum required fields.
+// Validate checks if the config has the minimum required fields and that the
+// schema version matches the current binary.
 func (c *Config) Validate() error {
+	if c.Version != currentConfigVersion {
+		return fmt.Errorf(
+			"config.yaml is schema version %d, expected %d. "+
+				"The 'schedule.time' field has been removed in favor of 'schedule.cron' "+
+				"(see README for migration). Update your config and set 'version: %d'",
+			c.Version, currentConfigVersion, currentConfigVersion)
+	}
 	if c.Repository.Path == "" {
 		return fmt.Errorf("repository.path is required")
 	}
@@ -138,8 +151,8 @@ func (c *Config) Validate() error {
 	if len(c.Backup.Paths) == 0 {
 		return fmt.Errorf("backup.paths is required")
 	}
-	if c.Schedule.Time == "" {
-		return fmt.Errorf("schedule.time is required")
+	if _, _, err := c.Schedule.ParseSchedule(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -155,4 +168,69 @@ func (c *Config) IsConfigured() bool {
 // IsTailscaleEnabled returns true if Tailscale is configured and enabled.
 func (c *Config) IsTailscaleEnabled() bool {
 	return c.Tailscale.Enabled && c.Tailscale.AuthKey != ""
+}
+
+// currentConfigVersion is the schema version this binary understands.
+const currentConfigVersion = 2
+
+// minScheduleGap is the smallest allowed delta between consecutive backup fires.
+// Matches the scheduler's 15-minute ticker.
+const minScheduleGap = 15 * time.Minute
+
+// ParseSchedule validates and parses cfg.Schedule.Cron, returning the parsed
+// schedule and the minimum gap between consecutive fires. Empty Cron defaults
+// to "@every 24h". Returns an error if the spec parses but fires more often
+// than minScheduleGap, or if the spec has no future fires.
+func (s ScheduleConfig) ParseSchedule() (cron.Schedule, time.Duration, error) {
+	spec := s.Cron
+	if spec == "" {
+		spec = "@every 24h"
+	}
+	sched, err := cron.ParseStandard(spec)
+	if err != nil {
+		return nil, 0, fmt.Errorf("schedule.cron is not a valid cron expression or @every descriptor: %w", err)
+	}
+	minGap, err := minGapOf(sched)
+	if err != nil {
+		return nil, 0, err
+	}
+	if minGap < minScheduleGap {
+		return nil, 0, fmt.Errorf("schedule.cron fires too frequently: current gap is %s, must be at least %s", minGap, minScheduleGap)
+	}
+	return sched, minGap, nil
+}
+
+// minGapOf walks the schedule from a fixed deterministic anchor and returns
+// the smallest delta between consecutive fires. Bounded to 1000 iterations or
+// one year of wall time, short-circuits as soon as a gap < minScheduleGap is
+// found.
+func minGapOf(sched cron.Schedule) (time.Duration, error) {
+	const maxIters = 1000
+	const maxSpan = 366 * 24 * time.Hour
+
+	anchor := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	prev := sched.Next(anchor)
+	if prev.IsZero() {
+		return 0, fmt.Errorf("schedule.cron has no future fires")
+	}
+	minGap := time.Duration(1<<63 - 1) // math.MaxInt64
+
+	for i := 0; i < maxIters; i++ {
+		next := sched.Next(prev)
+		if next.IsZero() {
+			break
+		}
+		gap := next.Sub(prev)
+		if gap < minGap {
+			minGap = gap
+		}
+		if minGap < minScheduleGap {
+			return minGap, nil
+		}
+		if next.Sub(anchor) >= maxSpan {
+			break
+		}
+		prev = next
+	}
+	return minGap, nil
 }

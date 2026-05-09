@@ -171,47 +171,6 @@ func TestStateRecordFailure(t *testing.T) {
 	}
 }
 
-// TestStateHasBackedUpToday tests the HasBackedUpToday method
-func TestStateHasBackedUpToday(t *testing.T) {
-	loc := time.Local
-
-	tests := []struct {
-		name             string
-		lastSuccess      time.Time
-		hasBackedUpToday bool
-	}{
-		{
-			name:             "zero time",
-			lastSuccess:      time.Time{},
-			hasBackedUpToday: false,
-		},
-		{
-			name:             "today",
-			lastSuccess:      time.Now(),
-			hasBackedUpToday: true,
-		},
-		{
-			name:             "yesterday",
-			lastSuccess:      time.Now().Add(-24 * time.Hour),
-			hasBackedUpToday: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &state.State{
-				Backup: state.BackupState{
-					LastSuccess: tt.lastSuccess,
-				},
-			}
-			result := s.HasBackedUpToday(loc)
-			if result != tt.hasBackedUpToday {
-				t.Errorf("HasBackedUpToday() = %v, want %v", result, tt.hasBackedUpToday)
-			}
-		})
-	}
-}
-
 // TestTailscaleEnabled tests the IsTailscaleEnabled method
 func TestTailscaleEnabled(t *testing.T) {
 	tests := []struct {
@@ -280,6 +239,7 @@ func TestConfigValidation(t *testing.T) {
 		{
 			name: "missing password",
 			cfg: config.Config{
+				Version: 2,
 				Repository: config.RepositoryConfig{
 					Path: "/backup/repo",
 				},
@@ -287,7 +247,7 @@ func TestConfigValidation(t *testing.T) {
 					Paths: []string{"/home"},
 				},
 				Schedule: config.ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: true,
@@ -295,25 +255,13 @@ func TestConfigValidation(t *testing.T) {
 		{
 			name: "missing paths",
 			cfg: config.Config{
+				Version: 2,
 				Repository: config.RepositoryConfig{
 					Path:     "/backup/repo",
 					Password: "secret",
 				},
 				Schedule: config.ScheduleConfig{
-					Time: "01:00",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing schedule time",
-			cfg: config.Config{
-				Repository: config.RepositoryConfig{
-					Path:     "/backup/repo",
-					Password: "secret",
-				},
-				Backup: config.BackupConfig{
-					Paths: []string{"/home"},
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: true,
@@ -321,6 +269,7 @@ func TestConfigValidation(t *testing.T) {
 		{
 			name: "valid config with password",
 			cfg: config.Config{
+				Version: 2,
 				Repository: config.RepositoryConfig{
 					Path:     "/backup/repo",
 					Password: "secret",
@@ -329,7 +278,7 @@ func TestConfigValidation(t *testing.T) {
 					Paths: []string{"/home"},
 				},
 				Schedule: config.ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: false,
@@ -337,6 +286,7 @@ func TestConfigValidation(t *testing.T) {
 		{
 			name: "valid config with password file",
 			cfg: config.Config{
+				Version: 2,
 				Repository: config.RepositoryConfig{
 					Path:         "/backup/repo",
 					PasswordFile: "/path/to/password",
@@ -345,7 +295,7 @@ func TestConfigValidation(t *testing.T) {
 					Paths: []string{"/home"},
 				},
 				Schedule: config.ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: false,
@@ -353,6 +303,7 @@ func TestConfigValidation(t *testing.T) {
 		{
 			name: "valid config with password command",
 			cfg: config.Config{
+				Version: 2,
 				Repository: config.RepositoryConfig{
 					Path:            "/backup/repo",
 					PasswordCommand: "pass show backup",
@@ -361,7 +312,7 @@ func TestConfigValidation(t *testing.T) {
 					Paths: []string{"/home"},
 				},
 				Schedule: config.ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: false,

@@ -154,23 +154,6 @@ func (s *State) LastSuccessAge() time.Duration {
 	return time.Since(s.Backup.LastSuccess)
 }
 
-// HasBackedUpToday returns true if there was a successful backup today.
-func (s *State) HasBackedUpToday(loc *time.Location) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.Backup.LastSuccess.IsZero() {
-		return false
-	}
-
-	now := time.Now().In(loc)
-	last := s.Backup.LastSuccess.In(loc)
-
-	return now.Year() == last.Year() &&
-		now.Month() == last.Month() &&
-		now.Day() == last.Day()
-}
-
 // GetLastUpdateCheck returns the time of the last update check.
 func (s *State) GetLastUpdateCheck() time.Time {
 	s.mu.RLock()
@@ -231,29 +214,3 @@ func (s *State) HasSuccessfulBackup() bool {
 	return !s.Backup.LastSuccess.IsZero()
 }
 
-// HasBackedUpTodayAfter returns true if there was a successful backup today
-// at or after the specified time. This combines the day check and time check
-// in a single lock acquisition to avoid TOCTOU races.
-func (s *State) HasBackedUpTodayAfter(loc *time.Location, afterTime time.Time) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.Backup.LastSuccess.IsZero() {
-		return false
-	}
-
-	now := time.Now().In(loc)
-	last := s.Backup.LastSuccess.In(loc)
-
-	// Check same day
-	sameDay := now.Year() == last.Year() &&
-		now.Month() == last.Month() &&
-		now.Day() == last.Day()
-
-	if !sameDay {
-		return false
-	}
-
-	// Check if backup was at or after the specified time
-	return !last.Before(afterTime)
-}

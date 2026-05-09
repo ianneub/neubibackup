@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidate(t *testing.T) {
@@ -16,11 +17,12 @@ func TestValidate(t *testing.T) {
 		{
 			name:    "empty config",
 			cfg:     Config{},
-			wantErr: "repository.path is required",
+			wantErr: "schema version",
 		},
 		{
 			name: "missing password",
 			cfg: Config{
+				Version: 2,
 				Repository: RepositoryConfig{
 					Path: "/backup/repo",
 				},
@@ -28,7 +30,7 @@ func TestValidate(t *testing.T) {
 					Paths: []string{"/home"},
 				},
 				Schedule: ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: "password",
@@ -36,32 +38,21 @@ func TestValidate(t *testing.T) {
 		{
 			name: "missing paths",
 			cfg: Config{
+				Version: 2,
 				Repository: RepositoryConfig{
 					Path:     "/backup/repo",
 					Password: "secret",
 				},
 				Schedule: ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: "backup.paths is required",
 		},
 		{
-			name: "missing schedule time",
-			cfg: Config{
-				Repository: RepositoryConfig{
-					Path:     "/backup/repo",
-					Password: "secret",
-				},
-				Backup: BackupConfig{
-					Paths: []string{"/home"},
-				},
-			},
-			wantErr: "schedule.time is required",
-		},
-		{
 			name: "valid config with password",
 			cfg: Config{
+				Version: 2,
 				Repository: RepositoryConfig{
 					Path:     "/backup/repo",
 					Password: "secret",
@@ -70,7 +61,7 @@ func TestValidate(t *testing.T) {
 					Paths: []string{"/home"},
 				},
 				Schedule: ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: "",
@@ -78,6 +69,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "valid config with password file",
 			cfg: Config{
+				Version: 2,
 				Repository: RepositoryConfig{
 					Path:         "/backup/repo",
 					PasswordFile: "/path/to/password",
@@ -86,7 +78,7 @@ func TestValidate(t *testing.T) {
 					Paths: []string{"/home"},
 				},
 				Schedule: ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: "",
@@ -94,6 +86,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "valid config with password command",
 			cfg: Config{
+				Version: 2,
 				Repository: RepositoryConfig{
 					Path:            "/backup/repo",
 					PasswordCommand: "pass show backup",
@@ -102,7 +95,7 @@ func TestValidate(t *testing.T) {
 					Paths: []string{"/home"},
 				},
 				Schedule: ScheduleConfig{
-					Time: "01:00",
+					Cron: "@every 24h",
 				},
 			},
 			wantErr: "",
@@ -357,9 +350,9 @@ func TestLoadFromFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `version: 1
+	configContent := `version: 2
 schedule:
-  time: "02:00"
+  cron: "@every 24h"
   timezone: "UTC"
 repository:
   path: "/backup/repo"
@@ -382,11 +375,11 @@ backup:
 	}
 
 	// Verify loaded values
-	if cfg.Version != 1 {
-		t.Errorf("Version = %d, want 1", cfg.Version)
+	if cfg.Version != 2 {
+		t.Errorf("Version = %d, want 2", cfg.Version)
 	}
-	if cfg.Schedule.Time != "02:00" {
-		t.Errorf("Schedule.Time = %q, want %q", cfg.Schedule.Time, "02:00")
+	if cfg.Schedule.Cron != "@every 24h" {
+		t.Errorf("Schedule.Cron = %q, want %q", cfg.Schedule.Cron, "@every 24h")
 	}
 	if cfg.Schedule.Timezone != "UTC" {
 		t.Errorf("Schedule.Timezone = %q, want %q", cfg.Schedule.Timezone, "UTC")
@@ -409,9 +402,9 @@ func TestLoadFromFile_TailscaleConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `version: 1
+	configContent := `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
 repository:
   path: "/backup/repo"
   password: "secret"
@@ -445,14 +438,13 @@ tailscale:
 }
 
 func TestLoadFromFile_TailscaleBackwardCompatibility(t *testing.T) {
-	// Test that old config files with 'ephemeral' field are still parsed
-	// (the field is ignored but shouldn't cause an error)
+	// With strict YAML decoding (v2 schema), unknown fields like 'ephemeral' are rejected.
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `version: 1
+	configContent := `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
 repository:
   path: "/backup/repo"
   password: "secret"
@@ -470,17 +462,9 @@ tailscale:
 		t.Fatalf("Failed to write test config: %v", err)
 	}
 
-	cfg, err := LoadFromFile(configPath)
-	if err != nil {
-		t.Fatalf("LoadFromFile() should not error on old config with ephemeral: %v", err)
-	}
-
-	// Verify the other fields still work
-	if !cfg.Tailscale.Enabled {
-		t.Error("Tailscale.Enabled should be true")
-	}
-	if cfg.Tailscale.AuthKey != "tskey-auth-test123" {
-		t.Errorf("Tailscale.AuthKey = %q, want %q", cfg.Tailscale.AuthKey, "tskey-auth-test123")
+	_, err := LoadFromFile(configPath)
+	if err == nil {
+		t.Fatal("LoadFromFile() should error for unknown field 'ephemeral' with strict decoding")
 	}
 }
 
@@ -511,9 +495,9 @@ func TestSaveToFile(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
 	cfg := &Config{
-		Version: 1,
+		Version: 2,
 		Schedule: ScheduleConfig{
-			Time:     "03:00",
+			Cron:     "@every 24h",
 			Timezone: "America/New_York",
 		},
 		Repository: RepositoryConfig{
@@ -546,8 +530,8 @@ func TestSaveToFile(t *testing.T) {
 		t.Fatalf("LoadFromFile() error = %v", err)
 	}
 
-	if loaded.Schedule.Time != cfg.Schedule.Time {
-		t.Errorf("Loaded Schedule.Time = %q, want %q", loaded.Schedule.Time, cfg.Schedule.Time)
+	if loaded.Schedule.Cron != cfg.Schedule.Cron {
+		t.Errorf("Loaded Schedule.Cron = %q, want %q", loaded.Schedule.Cron, cfg.Schedule.Cron)
 	}
 	if loaded.Repository.Path != cfg.Repository.Path {
 		t.Errorf("Loaded Repository.Path = %q, want %q", loaded.Repository.Path, cfg.Repository.Path)
@@ -571,9 +555,9 @@ func TestLoadFromFile_SkipOnBattery(t *testing.T) {
 	}{
 		{
 			name: "not specified defaults to false",
-			yaml: `version: 1
+			yaml: `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
 repository:
   path: "/backup/repo"
   password: "secret"
@@ -585,9 +569,9 @@ backup:
 		},
 		{
 			name: "explicitly false",
-			yaml: `version: 1
+			yaml: `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
   skip_on_battery: false
 repository:
   path: "/backup/repo"
@@ -600,9 +584,9 @@ backup:
 		},
 		{
 			name: "explicitly true",
-			yaml: `version: 1
+			yaml: `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
   skip_on_battery: true
 repository:
   path: "/backup/repo"
@@ -644,9 +628,9 @@ func TestLoadFromFile_AllowedSSIDs(t *testing.T) {
 	}{
 		{
 			name: "not specified defaults to empty",
-			yaml: `version: 1
+			yaml: `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
 repository:
   path: "/backup/repo"
   password: "secret"
@@ -658,9 +642,9 @@ backup:
 		},
 		{
 			name: "empty list",
-			yaml: `version: 1
+			yaml: `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
   allowed_ssids: []
 repository:
   path: "/backup/repo"
@@ -673,9 +657,9 @@ backup:
 		},
 		{
 			name: "single SSID",
-			yaml: `version: 1
+			yaml: `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
   allowed_ssids:
     - "HomeWiFi"
 repository:
@@ -689,9 +673,9 @@ backup:
 		},
 		{
 			name: "multiple SSIDs",
-			yaml: `version: 1
+			yaml: `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
   allowed_ssids:
     - "HomeWiFi"
     - "OfficeNetwork"
@@ -743,10 +727,10 @@ func TestLoadFromFile_LogLevel(t *testing.T) {
 	}{
 		{
 			name: "log_level debug",
-			yaml: `version: 1
+			yaml: `version: 2
 log_level: "debug"
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
 repository:
   path: "/backup/repo"
   password: "secret"
@@ -758,10 +742,10 @@ backup:
 		},
 		{
 			name: "log_level error",
-			yaml: `version: 1
+			yaml: `version: 2
 log_level: "error"
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
 repository:
   path: "/backup/repo"
   password: "secret"
@@ -773,9 +757,9 @@ backup:
 		},
 		{
 			name: "log_level not set (empty string)",
-			yaml: `version: 1
+			yaml: `version: 2
 schedule:
-  time: "01:00"
+  cron: "@every 24h"
 repository:
   path: "/backup/repo"
   password: "secret"
@@ -805,5 +789,224 @@ backup:
 				t.Errorf("LogLevel = %q, want %q", cfg.LogLevel, tt.expected)
 			}
 		})
+	}
+}
+
+func TestParseSchedule_DefaultEmpty(t *testing.T) {
+	s := ScheduleConfig{Cron: ""}
+	sched, gap, err := s.ParseSchedule()
+	if err != nil {
+		t.Fatalf("ParseSchedule(\"\") err = %v", err)
+	}
+	if sched == nil {
+		t.Fatal("ParseSchedule(\"\") returned nil schedule")
+	}
+	if gap != 24*time.Hour {
+		t.Errorf("default min gap = %s, want 24h", gap)
+	}
+}
+
+func TestParseSchedule_Valid(t *testing.T) {
+	cases := []struct {
+		spec string
+		gap  time.Duration
+	}{
+		{"@every 1h", time.Hour},
+		{"@every 30m", 30 * time.Minute},
+		{"@every 15m", 15 * time.Minute},
+		{"@every 24h", 24 * time.Hour},
+		{"@daily", 24 * time.Hour},
+		{"@hourly", time.Hour},
+		{"0 1 * * *", 24 * time.Hour},
+		{"*/15 * * * *", 15 * time.Minute},
+		{"0 1,2 * * *", time.Hour},
+		{"0 8,18 * * *", 10 * time.Hour},
+	}
+	for _, tc := range cases {
+		t.Run(tc.spec, func(t *testing.T) {
+			s := ScheduleConfig{Cron: tc.spec}
+			sched, gap, err := s.ParseSchedule()
+			if err != nil {
+				t.Fatalf("ParseSchedule(%q) err = %v", tc.spec, err)
+			}
+			if sched == nil {
+				t.Fatal("nil schedule")
+			}
+			if gap != tc.gap {
+				t.Errorf("min gap = %s, want %s", gap, tc.gap)
+			}
+		})
+	}
+}
+
+func TestParseSchedule_Rejected(t *testing.T) {
+	cases := []struct {
+		spec      string
+		wantInErr string
+	}{
+		{"@every 10m", "fires too frequently"},
+		{"@every 0s", "fires too frequently"},
+		{"*/10 * * * *", "fires too frequently"},
+		{"0,5 * * * *", "fires too frequently"},
+		{"* * * * *", "fires too frequently"},
+		{"garbage", "not a valid cron expression"},
+		{"60 * * * *", "not a valid cron expression"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.spec, func(t *testing.T) {
+			s := ScheduleConfig{Cron: tc.spec}
+			_, _, err := s.ParseSchedule()
+			if err == nil {
+				t.Fatalf("ParseSchedule(%q) expected error, got nil", tc.spec)
+			}
+			if !strings.Contains(err.Error(), tc.wantInErr) {
+				t.Errorf("ParseSchedule(%q) err = %q, want to contain %q", tc.spec, err.Error(), tc.wantInErr)
+			}
+		})
+	}
+}
+
+func TestParseSchedule_PathologicalShortCircuits(t *testing.T) {
+	// Regression guard: "* * * * *" must not iterate the full 1000-fire / 1-year
+	// budget — it should detect a sub-15m gap on the first iteration.
+	s := ScheduleConfig{Cron: "* * * * *"}
+	start := time.Now()
+	_, _, err := s.ParseSchedule()
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected error for '* * * * *'")
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("ParseSchedule short-circuit took %s, want < 100ms", elapsed)
+	}
+}
+
+func TestValidate_VersionV1Rejected(t *testing.T) {
+	cfg := Config{
+		Version: 1,
+		Repository: RepositoryConfig{
+			Path:     "/backup/repo",
+			Password: "secret",
+		},
+		Backup: BackupConfig{
+			Paths: []string{"/home"},
+		},
+		Schedule: ScheduleConfig{
+			Cron: "@every 24h",
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() expected v1 rejection, got nil")
+	}
+	for _, want := range []string{"schema version", "schedule.cron", "version: 2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Validate() err = %q, want substring %q", err.Error(), want)
+		}
+	}
+}
+
+func TestValidate_VersionZeroRejected(t *testing.T) {
+	cfg := Config{
+		Repository: RepositoryConfig{
+			Path:     "/backup/repo",
+			Password: "secret",
+		},
+		Backup: BackupConfig{
+			Paths: []string{"/home"},
+		},
+		Schedule: ScheduleConfig{
+			Cron: "@every 24h",
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected version-0 rejection, got nil")
+	}
+}
+
+func TestValidate_AcceptsV2WithEmptyCron(t *testing.T) {
+	cfg := Config{
+		Version: 2,
+		Repository: RepositoryConfig{
+			Path:     "/backup/repo",
+			Password: "secret",
+		},
+		Backup: BackupConfig{
+			Paths: []string{"/home"},
+		},
+		Schedule: ScheduleConfig{Cron: ""},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with empty Cron err = %v, want nil", err)
+	}
+}
+
+func TestValidate_RejectsBadCron(t *testing.T) {
+	cfg := Config{
+		Version: 2,
+		Repository: RepositoryConfig{
+			Path:     "/backup/repo",
+			Password: "secret",
+		},
+		Backup: BackupConfig{
+			Paths: []string{"/home"},
+		},
+		Schedule: ScheduleConfig{Cron: "*/5 * * * *"},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() expected sub-15m cron rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "fires too frequently") {
+		t.Errorf("Validate() err = %q, want substring %q", err.Error(), "fires too frequently")
+	}
+}
+
+func TestLoadFromFile_RejectsStrayTimeField(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	body := []byte(`version: 2
+schedule:
+  cron: "@every 24h"
+  time: "01:00"
+repository:
+  path: /repo
+  password: secret
+backup:
+  paths: ["/home"]
+`)
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFromFile(path); err == nil {
+		t.Fatal("LoadFromFile() expected strict-decoding error for stray time:, got nil")
+	} else if !strings.Contains(err.Error(), "time") {
+		t.Errorf("LoadFromFile() err = %q, want to mention 'time'", err.Error())
+	}
+}
+
+func TestLoadFromFile_RejectsV1ConfigOnValidate(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	body := []byte(`version: 1
+schedule:
+  cron: "@every 24h"
+repository:
+  path: /repo
+  password: secret
+backup:
+  paths: ["/home"]
+`)
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatalf("LoadFromFile() err = %v, want clean parse", err)
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() of v1 config expected error, got nil")
+	} else if !strings.Contains(err.Error(), "schema version") {
+		t.Errorf("Validate() err = %q, want substring 'schema version'", err.Error())
 	}
 }

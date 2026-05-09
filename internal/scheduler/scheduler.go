@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	cron "github.com/robfig/cron/v3"
+
 	"neubibackup/internal/config"
 	"neubibackup/internal/idle"
 	"neubibackup/internal/network"
@@ -18,12 +20,21 @@ import (
 // BackupFunc is called when a backup should be executed.
 type BackupFunc func()
 
+// tickInterval is how often the scheduler wakes to evaluate whether a backup
+// is due. Kept short (1 min) so the actual fire time tracks the cron schedule
+// closely — independent of the user-facing minScheduleGap (15m), which limits
+// how often a backup can be configured to run, not how often we wake to check.
+const tickInterval = 1 * time.Minute
+
 // Scheduler manages backup timing and triggers.
 type Scheduler struct {
 	config     *config.Config
 	state      *state.State
 	onBackup   BackupFunc
 	location   *time.Location
+	schedule   cron.Schedule
+	minGap     time.Duration
+	nextTickAt time.Time // when the next checkAndTrigger will run; zero before Start
 	mu         sync.Mutex
 	running    bool
 }
@@ -35,11 +46,18 @@ func New(cfg *config.Config, st *state.State, onBackup BackupFunc) (*Scheduler, 
 		return nil, err
 	}
 
+	sched, minGap, err := cfg.Schedule.ParseSchedule()
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+
 	return &Scheduler{
 		config:   cfg,
 		state:    st,
 		onBackup: onBackup,
 		location: loc,
+		schedule: sched,
+		minGap:   minGap,
 	}, nil
 }
 
@@ -53,8 +71,15 @@ func (s *Scheduler) UpdateConfig(cfg *config.Config) error {
 		return err
 	}
 
+	sched, minGap, err := cfg.Schedule.ParseSchedule()
+	if err != nil {
+		return fmt.Errorf("scheduler: %w", err)
+	}
+
 	s.config = cfg
 	s.location = loc
+	s.schedule = sched
+	s.minGap = minGap
 	return nil
 }
 
@@ -67,7 +92,11 @@ func (s *Scheduler) UpdateState(st *state.State) {
 
 // Start begins the schedule loop. Call in a goroutine.
 func (s *Scheduler) Start(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Minute)
+	s.mu.Lock()
+	s.nextTickAt = time.Now().Add(tickInterval)
+	s.mu.Unlock()
+
+	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
 	// Check immediately on start
@@ -77,7 +106,10 @@ func (s *Scheduler) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case t := <-ticker.C:
+			s.mu.Lock()
+			s.nextTickAt = t.Add(tickInterval)
+			s.mu.Unlock()
 			s.checkAndTrigger()
 		}
 	}
@@ -118,6 +150,13 @@ func (s *Scheduler) Location() *time.Location {
 	return s.location
 }
 
+// MinGap returns the minimum gap between consecutive fires for the current schedule.
+func (s *Scheduler) MinGap() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.minGap
+}
+
 func (s *Scheduler) checkAndTrigger() {
 	s.mu.Lock()
 	if s.running {
@@ -146,56 +185,31 @@ func (s *Scheduler) checkAndTrigger() {
 // shouldRunNow checks if a backup should be triggered.
 // Must be called with mu held.
 func (s *Scheduler) shouldRunNow() bool {
-	// First check if we're due for a backup based on schedule
 	if !s.isBackupDue() {
 		return false
 	}
-
-	// Now check pre-flight conditions
 	if !s.checkBatteryOK() {
 		return false
 	}
-
 	if !s.checkSSIDOK() {
 		return false
 	}
-
 	if !s.checkUserActive() {
 		return false
 	}
-
 	return true
 }
 
-// isBackupDue checks if a backup is due based on schedule time.
+// isBackupDue returns true if the schedule has fired at least once since the
+// last successful backup (or ever, if no successful backup has happened).
 // Must be called with mu held.
 func (s *Scheduler) isBackupDue() bool {
-	scheduleTime, err := parseTime(s.config.Schedule.Time)
-	if err != nil {
-		slog.Error("Invalid schedule time", "time", s.config.Schedule.Time, "error", err)
-		return false
+	last := s.state.GetLastSuccess()
+	if last.IsZero() {
+		return true
 	}
-
-	now := time.Now().In(s.location)
-
-	// Get today's scheduled time
-	todaySchedule := time.Date(
-		now.Year(), now.Month(), now.Day(),
-		scheduleTime.Hour(), scheduleTime.Minute(), 0, 0,
-		s.location,
-	)
-
-	// If it's before today's scheduled time, no backup needed
-	if now.Before(todaySchedule) {
-		return false
-	}
-
-	// If we already backed up today (after the scheduled time), no backup needed
-	if s.state.HasBackedUpTodayAfter(s.location, todaySchedule) {
-		return false
-	}
-
-	return true
+	next := s.schedule.Next(last)
+	return !time.Now().Before(next)
 }
 
 // checkBatteryOK returns true if battery status allows backup to proceed.
@@ -258,47 +272,54 @@ func (s *Scheduler) checkUserActive() bool {
 	return true
 }
 
-// NextBackupTime returns when the next backup is scheduled.
+// NextBackupTime returns when the next scheduled backup will actually fire.
+// The result accounts for the scheduler's tick granularity: backups can only
+// fire at a tick boundary, so the returned time is rounded up to the first
+// tick at or after the cron schedule's next fire.
+//
+// If no successful backup has happened yet, returns time.Now() (the immediate
+// startup check should fire one momentarily).
 func (s *Scheduler) NextBackupTime() (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	scheduleTime, err := parseTime(s.config.Schedule.Time)
-	if err != nil {
-		return time.Time{}, err
+	last := s.state.GetLastSuccess()
+	if last.IsZero() {
+		return time.Now(), nil
 	}
 
-	now := time.Now().In(s.location)
+	scheduledFire := s.schedule.Next(last)
+	now := time.Now()
 
-	// Get today's scheduled time
-	todaySchedule := time.Date(
-		now.Year(), now.Month(), now.Day(),
-		scheduleTime.Hour(), scheduleTime.Minute(), 0, 0,
-		s.location,
-	)
-
-	// If we already passed today's schedule, return tomorrow's
-	if now.After(todaySchedule) {
-		return todaySchedule.AddDate(0, 0, 1), nil
+	// Overdue (schedule already fired): the actual run happens at the next
+	// scheduler tick. Without a tick clock (no Start() yet — unit-test path),
+	// fall back to "now" so callers see "Backup due".
+	if !scheduledFire.After(now) {
+		if s.nextTickAt.IsZero() {
+			return now, nil
+		}
+		return s.nextTickAt, nil
 	}
 
-	return todaySchedule, nil
-}
-
-func parseTime(timeStr string) (time.Time, error) {
-	// Try 24-hour format
-	t, err := time.Parse("15:04", timeStr)
-	if err == nil {
-		return t, nil
+	// Future fire. Without a tick clock, return the raw schedule fire.
+	if s.nextTickAt.IsZero() {
+		return scheduledFire, nil
 	}
 
-	// Try with seconds
-	t, err = time.Parse("15:04:05", timeStr)
-	if err == nil {
-		return t, nil
+	// Scheduled fire is at or before the next tick: the actual fire is the
+	// next tick.
+	if !scheduledFire.After(s.nextTickAt) {
+		return s.nextTickAt, nil
 	}
 
-	return time.Time{}, fmt.Errorf("invalid time format: %s (expected HH:MM)", timeStr)
+	// Scheduled fire is after the next tick: round up to the first tick at or
+	// after the scheduled fire.
+	gap := scheduledFire.Sub(s.nextTickAt)
+	ticks := int(gap / tickInterval)
+	if gap%tickInterval != 0 {
+		ticks++
+	}
+	return s.nextTickAt.Add(time.Duration(ticks) * tickInterval), nil
 }
 
 func getLocation(cfg *config.Config) (*time.Location, error) {

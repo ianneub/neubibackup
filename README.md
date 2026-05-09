@@ -6,7 +6,7 @@ A simple system tray application that automatically backs up your files using [r
 
 ## Features
 
-- **Daily scheduled backups** - Set a time and your files are backed up automatically
+- **Configurable schedule** - Cron expression or `@every <duration>` (hourly, daily, custom cadence)
 - **Missed backup detection** - If your computer was off or asleep, backs up when you return
 - **Retry with backoff** - Automatically retries failed backups (up to 5 attempts)
 - **System tray interface** - Runs quietly in the background with status at a glance
@@ -59,15 +59,21 @@ Download the latest release for your platform:
 Configuration is stored in `~/neubibackup/config.yaml`. Here's a complete example:
 
 ```yaml
-version: 1
+version: 2
 
 # Log verbosity: debug, info, warn, error (default: info)
 # log_level: "info"
 
-# When to run daily backups (24-hour format)
+# Backup schedule (cron expression or "@every <duration>"). Minimum gap: 15m.
+# Examples:
+#   "@every 1h"      — every hour, rolling from last success
+#   "@every 6h"      — every 6 hours
+#   "0 1 * * *"      — every day at 01:00
+#   "*/30 * * * *"   — every 30 minutes
+#   "0 8,18 * * *"   — daily at 08:00 and 18:00
 schedule:
-  time: "02:00"
-  timezone: "America/New_York"  # Optional, defaults to system timezone
+  cron: "@every 24h"
+  timezone: "America/New_York"  # Optional, defaults to system timezone (affects cron expressions)
   skip_on_battery: false        # Optional, skip scheduled backups when on battery power
   # allowed_ssids:              # Optional, only backup on these WiFi SSIDs
   #   - "HomeWiFi"
@@ -138,6 +144,37 @@ tailscale:
   hostname: "neubibackup"    # Hostname for this device in your tailnet
 ```
 
+### Migrating from v1 to v2
+
+NeubiBackup v2 replaces the `schedule.time` field with the more flexible `schedule.cron`. If you upgrade from v1 you must update your `config.yaml` once:
+
+1. Set `version: 2` at the top of the file.
+2. Remove the `schedule.time: "HH:MM"` line.
+3. Add a `schedule.cron: "<expression>"` line. To preserve your previous behavior:
+
+   | Old                         | New                          |
+   |-----------------------------|------------------------------|
+   | `time: "01:00"`             | `cron: "0 1 * * *"`          |
+   | `time: "02:00"`             | `cron: "0 2 * * *"`          |
+   | (no preference on wall time) | `cron: "@every 24h"`         |
+
+The app refuses to start until you complete this migration; the validation error in `app.log` will tell you exactly what's wrong.
+
+### Backup frequency
+
+Two syntaxes are supported by `schedule.cron`:
+
+- **`@every <Go duration>`** — rolling cadence anchored to the last successful backup. Examples: `"@every 30m"`, `"@every 1h"`, `"@every 6h"`. Best when you don't care about the wall-clock time.
+- **5-field cron expressions** — calendar-anchored fires. Examples: `"0 1 * * *"` (daily at 01:00), `"*/30 * * * *"` (every 30 minutes on the half-hour), `"0 8,18 * * *"` (twice a day).
+
+The minimum gap between consecutive fires is **15 minutes** (the scheduler tick rate). Configurations that fire more often are rejected at startup.
+
+When you back up frequently (hourly or sub-hourly), keep these trade-offs in mind:
+
+- **Healthchecks.io** pings fire on every backup — set the schedule grace there to match.
+- **Pushover** with `on_success: true` produces one notification per run.
+- **Logs** are retained automatically — daily backups keep 25, hourly keeps ~168, capped at 500.
+
 ### Setting Up a Repository
 
 Before using NeubiBackup, you need a restic repository. See the [restic documentation](https://restic.readthedocs.io/en/latest/030_preparing_a_new_repo.html) for setup instructions.
@@ -202,14 +239,13 @@ All NeubiBackup data is stored in `~/neubibackup/`:
 The app detects missed backups when:
 
 - It's running (either at startup or after wake from sleep)
-- The scheduled time has passed for today
-- No successful backup exists for today
+- The schedule has fired at least once since the last successful backup (e.g. with `cron: "@every 1h"` and the last success more than an hour ago)
 
 Make sure the app is set to **Start at Login** for reliable scheduling.
 
 ### Battery power
 
-If you enable `skip_on_battery: true` in your config, scheduled backups will be deferred while running on battery power. The backup will run automatically when AC power is restored (if still due that day). Manual backups via "Backup Now" always run regardless of power state.
+If you enable `skip_on_battery: true` in your config, scheduled backups will be deferred while running on battery power. The backup will run automatically when AC power is restored (if the schedule has fired since the last successful backup). Manual backups via "Backup Now" always run regardless of power state.
 
 ### WiFi SSID restrictions
 

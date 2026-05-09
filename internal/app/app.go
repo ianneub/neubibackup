@@ -23,9 +23,10 @@ import (
 // App is the main application struct that manages all application state and lifecycle.
 type App struct {
 	// Config & state
-	cfg     *config.Config
-	state   *state.State
-	version string
+	cfg         *config.Config
+	configError error // last config load/validate error, surfaced in the tray UI
+	state       *state.State
+	version     string
 
 	// Managers
 	sched         *scheduler.Scheduler
@@ -105,13 +106,14 @@ func New(version string, opts ...Option) *App {
 func (a *App) Initialize() error {
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 
-	// Try to load config early to get log level (before logging is set up)
-	// If config doesn't exist or fails to load, we'll use default log level
+	// Try to load config early to get log level (before logging is set up).
+	// We only read log_level here — full validation happens after logging is
+	// up so any error is captured in the persistent app log AND surfaced in
+	// the tray UI via a.configError.
 	var logLevel slog.Level = slog.LevelInfo
 	if exists, _ := config.ConfigExists(); exists {
 		if cfg, err := config.Load(); err == nil {
 			logLevel = logging.ParseLogLevel(cfg.LogLevel)
-			a.cfg = cfg
 		}
 	}
 
@@ -156,10 +158,10 @@ func (a *App) Initialize() error {
 		if err := a.handleFirstRun(); err != nil {
 			slog.Error("Error during first run setup", "error", err)
 		}
-	} else if a.cfg == nil {
-		// Config exists but wasn't loaded yet (shouldn't happen, but handle it)
-		a.cfg, err = config.Load()
-		if err != nil {
+	} else {
+		// Config exists. Load and validate; errors are stored on a.configError
+		// so the tray UI can show them.
+		if err := a.loadAndValidateConfig(); err != nil {
 			slog.Error("Error loading config", "error", err)
 		}
 	}
@@ -176,9 +178,16 @@ func (a *App) Initialize() error {
 		BackupState:   a.backupState,
 		UpdateState:   a.updateState,
 		IsConfigured:  func() bool { return a.cfg != nil && a.cfg.IsConfigured() },
+		ConfigError:   a.ConfigError,
 		Autostart:     a.autostartMgr,
-		OnBackupNow:   a.TriggerBackup,
-		OnStopBackup:  a.StopBackup,
+		Schedule: func() tray.ScheduleProvider {
+			if a.sched == nil {
+				return nil
+			}
+			return a.sched
+		},
+		OnBackupNow:    a.TriggerBackup,
+		OnStopBackup:   a.StopBackup,
 		OnOpenConfig:   a.openConfig,
 		OnOpenLogs:     a.openLogs,
 		OnOpenAppLog:   a.openAppLog,
@@ -278,6 +287,32 @@ func (a *App) Shutdown() {
 	}
 }
 
+// loadAndValidateConfig loads config from disk and validates it. On success
+// it sets a.cfg and clears a.configError. On failure it sets a.configError
+// and clears a.cfg so downstream `IsConfigured` checks return false.
+func (a *App) loadAndValidateConfig() error {
+	cfg, err := config.Load()
+	if err != nil {
+		a.cfg = nil
+		a.configError = err
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		a.cfg = nil
+		a.configError = err
+		return err
+	}
+	a.cfg = cfg
+	a.configError = nil
+	return nil
+}
+
+// ConfigError returns the most recent config load/validate error, or nil if
+// the current config is valid.
+func (a *App) ConfigError() error {
+	return a.configError
+}
+
 // handleFirstRun creates the config file and opens it in the editor.
 func (a *App) handleFirstRun() error {
 	slog.Info("First run detected, creating config file...")
@@ -298,13 +333,9 @@ func (a *App) handleFirstRun() error {
 		slog.Warn("Could not open config in editor", "error", err)
 	}
 
-	// Load the new (unconfigured) config
-	a.cfg, err = config.Load()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	// Load and validate the new (unconfigured) config so a.configError is set
+	// if the freshly-written template has a problem.
+	return a.loadAndValidateConfig()
 }
 
 // Menu callback functions
@@ -362,6 +393,10 @@ func (a *App) initScheduler() {
 
 	go a.sched.Start(a.ctx)
 	slog.Info("Scheduler started")
+
+	if a.menu != nil {
+		a.menu.UpdateStatus()
+	}
 }
 
 // TriggerBackup starts a backup if one is not already running.
@@ -442,11 +477,16 @@ func (a *App) runBackup() {
 	}
 
 	// Create and run orchestrator
+	logRetention := logging.DefaultMaxLogFiles
+	if a.sched != nil {
+		logRetention = logging.RetentionFor(a.sched.MinGap())
+	}
 	orchestrator := backup.NewOrchestrator(a.cfg, a.state,
 		backup.WithNotifier(notifier),
 		backup.WithTailscale(tailscaleProvider),
 		backup.WithProgressCallback(onProgress),
 		backup.WithLocation(loc),
+		backup.WithLogRetention(logRetention),
 	)
 
 	result := orchestrator.Run(ctx)
@@ -524,13 +564,15 @@ func (a *App) ReloadConfig() {
 		a.backupState.StopBackup()
 	}
 
-	newCfg, err := config.Load()
-	if err != nil {
+	if err := a.loadAndValidateConfig(); err != nil {
 		slog.Error("Error reloading config", "error", err)
+		// Even on error, refresh UI so the tray shows the new error message.
+		a.updateIcon()
+		if a.menu != nil {
+			a.menu.RefreshOnConfigChange()
+		}
 		return
 	}
-
-	a.cfg = newCfg
 
 	// Update scheduler if it exists
 	if a.sched != nil {

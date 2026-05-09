@@ -3,6 +3,7 @@ package logging
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,9 +14,15 @@ import (
 )
 
 const (
-	maxLogFiles    = 25
-	logTimeFormat  = "2006-01-02T15-04-05"
-	logFileSuffix  = ".log"
+	// DefaultMaxLogFiles is used when the caller doesn't compute a per-schedule
+	// retention. Roughly one daily backup for ~25 days.
+	DefaultMaxLogFiles = 25
+
+	// MaxLogFilesCap is the hard ceiling on retained logs.
+	MaxLogFilesCap = 500
+
+	logTimeFormat = "2006-01-02T15-04-05"
+	logFileSuffix = ".log"
 )
 
 // CreateLogFile creates a new log file with the current timestamp.
@@ -26,16 +33,13 @@ func CreateLogFile() (*os.File, error) {
 		return nil, fmt.Errorf("get logs dir: %w", err)
 	}
 
-	// Ensure logs directory exists
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
 		return nil, fmt.Errorf("create logs dir: %w", err)
 	}
 
-	// Generate filename with current timestamp
 	filename := time.Now().Format(logTimeFormat) + logFileSuffix
 	logPath := filepath.Join(logsDir, filename)
 
-	// Create the log file
 	file, err := os.Create(logPath)
 	if err != nil {
 		return nil, fmt.Errorf("create log file: %w", err)
@@ -44,23 +48,25 @@ func CreateLogFile() (*os.File, error) {
 	return file, nil
 }
 
-// CleanupOldLogs removes all but the most recent maxLogFiles log files.
-func CleanupOldLogs() error {
+// CleanupOldLogs removes all but the most recent maxFiles log files.
+// If maxFiles <= 0, it falls back to DefaultMaxLogFiles.
+func CleanupOldLogs(maxFiles int) error {
+	if maxFiles <= 0 {
+		maxFiles = DefaultMaxLogFiles
+	}
 	logsDir, err := config.GetLogsDir()
 	if err != nil {
 		return fmt.Errorf("get logs dir: %w", err)
 	}
 
-	// List all log files
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // No logs directory yet
+			return nil
 		}
 		return fmt.Errorf("read logs dir: %w", err)
 	}
 
-	// Filter to only .log files
 	var logFiles []string
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), logFileSuffix) {
@@ -68,16 +74,13 @@ func CleanupOldLogs() error {
 		}
 	}
 
-	// If we have fewer than the max, nothing to do
-	if len(logFiles) <= maxLogFiles {
+	if len(logFiles) <= maxFiles {
 		return nil
 	}
 
-	// Sort by name (which sorts by timestamp due to ISO format)
 	sort.Strings(logFiles)
 
-	// Delete oldest files (those at the start of the sorted list)
-	toDelete := len(logFiles) - maxLogFiles
+	toDelete := len(logFiles) - maxFiles
 	for i := 0; i < toDelete; i++ {
 		logPath := filepath.Join(logsDir, logFiles[i])
 		if err := os.Remove(logPath); err != nil {
@@ -86,6 +89,24 @@ func CleanupOldLogs() error {
 	}
 
 	return nil
+}
+
+// RetentionFor computes the number of log files to retain so that frequent
+// backups (e.g. hourly) keep ~7 days of logs while daily backups keep the
+// historical default of 25. Capped at MaxLogFilesCap.
+func RetentionFor(minGap time.Duration) int {
+	if minGap <= 0 {
+		return DefaultMaxLogFiles
+	}
+	week := (7 * 24 * time.Hour).Seconds()
+	want := int(math.Ceil(week / minGap.Seconds()))
+	if want < DefaultMaxLogFiles {
+		want = DefaultMaxLogFiles
+	}
+	if want > MaxLogFilesCap {
+		want = MaxLogFilesCap
+	}
+	return want
 }
 
 // GetLogPath returns the full path for a log file given its filename.

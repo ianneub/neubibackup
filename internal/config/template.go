@@ -8,15 +8,21 @@ import (
 // DefaultConfigTemplate is the template for a new config file with helpful comments.
 const DefaultConfigTemplate = `# NeubiBackup Configuration
 # Documentation: https://github.com/ianneub/neubibackup
-version: 1
+version: 2
 
 # Log verbosity: debug, info, warn, error (default: info)
 # log_level: "info"
 
 # Schedule settings
 schedule:
-  time: "01:00"              # 24-hour format, local time
-  # timezone: ""             # Optional, defaults to system timezone (e.g., "America/New_York")
+  cron: "@every 24h"         # Cron expression or "@every <duration>". Minimum gap: 15m.
+                             # Examples:
+                             #   "@every 1h"      — every hour, rolling from last success
+                             #   "@every 6h"      — every 6 hours
+                             #   "0 1 * * *"      — every day at 01:00 (cron)
+                             #   "*/30 * * * *"   — every 30 minutes on the half-hour
+                             #   "0 8,18 * * *"   — daily at 08:00 and 18:00
+  # timezone: ""             # Optional, defaults to system timezone (affects cron expressions)
   # skip_on_battery: false   # Skip scheduled backups when on battery power (manual backups always run)
   # allowed_ssids: []        # Only run scheduled backups on these WiFi SSIDs (empty = no restriction)
   #   - "HomeWiFi"           # Example: backup on home network

@@ -2,6 +2,8 @@ package tray
 
 import (
 	"log/slog"
+	"strings"
+	"time"
 
 	"neubibackup/internal/restic"
 	"neubibackup/internal/state"
@@ -27,6 +29,11 @@ type AutostartProvider interface {
 	Toggle() error
 }
 
+// ScheduleProvider provides the next scheduled backup time.
+type ScheduleProvider interface {
+	NextBackupTime() (time.Time, error)
+}
+
 // MenuConfig configures the menu behavior.
 type MenuConfig struct {
 	Version       string
@@ -37,7 +44,17 @@ type MenuConfig struct {
 	BackupState  BackupStateProvider
 	UpdateState  UpdateStateProvider
 	IsConfigured func() bool
-	Autostart    AutostartProvider
+	// ConfigError returns the most recent config load/validate error.
+	// When non-nil, the menu surfaces it in the status line + tooltip
+	// instead of the usual "Last backup" / "Configuration required" text.
+	// May be nil if the caller does not provide one.
+	ConfigError func() error
+	Autostart   AutostartProvider
+	// Schedule is a getter (not a value) so the menu picks up the scheduler
+	// after a late initScheduler call (e.g. unconfigured -> configured via
+	// config reload). Returning nil means "no scheduler available, hide the
+	// next-backup line".
+	Schedule func() ScheduleProvider
 
 	// Action callbacks
 	OnBackupNow    func()
@@ -56,6 +73,7 @@ type Menu struct {
 
 	// Menu items (internal references for dynamic updates)
 	mStatus       *systray.MenuItem
+	mNextBackup   *systray.MenuItem
 	mBackupNow    *systray.MenuItem
 	mStopBackup   *systray.MenuItem
 	mAutostart    *systray.MenuItem
@@ -74,13 +92,22 @@ func NewMenu(cfg MenuConfig) *Menu {
 func (m *Menu) setup() {
 	isConfigured := m.cfg.IsConfigured()
 
-	// Status line
-	if !isConfigured {
+	// Status line: config error takes priority over other states.
+	if cfgErr := m.currentConfigError(); cfgErr != nil {
+		title, tooltip := statusLineForError(cfgErr)
+		m.mStatus = systray.AddMenuItem(title, tooltip)
+	} else if !isConfigured {
 		m.mStatus = systray.AddMenuItem("Configuration required...", "Please edit config.yaml")
 	} else {
 		m.mStatus = systray.AddMenuItem(FormatStatus(m.cfg.AppState(), m.cfg.BackupState.IsRunning()), "Backup status")
 	}
 	m.mStatus.Disable()
+
+	m.mNextBackup = systray.AddMenuItem("", "Next scheduled backup")
+	m.mNextBackup.Disable()
+	if !isConfigured {
+		m.mNextBackup.Hide()
+	}
 
 	systray.AddSeparator()
 
@@ -204,9 +231,66 @@ func (m *Menu) toggleAutostart() {
 	}
 }
 
+// statusLineMaxLen caps the menu item title length so a long error message
+// doesn't push the menu off screen. The full text is always available in the
+// tooltip.
+const statusLineMaxLen = 110
+
+// statusLineForError builds the title and tooltip for the status line when
+// the config has an error. The title is truncated; the tooltip carries the
+// full message verbatim.
+func statusLineForError(err error) (title, tooltip string) {
+	full := err.Error()
+	tooltip = full
+	// Collapse internal newlines so the title stays on one line.
+	oneLine := strings.ReplaceAll(full, "\n", " ")
+	if len(oneLine) > statusLineMaxLen {
+		oneLine = oneLine[:statusLineMaxLen-1] + "…"
+	}
+	title = "⚠ " + oneLine
+	return title, tooltip
+}
+
+// nextBackupMenuText decides what the next-backup menu line should display.
+// Returns ("", false) when the line should be hidden.
+func nextBackupMenuText(isConfigured, isRunning bool, scheduleFn func() ScheduleProvider) (string, bool) {
+	if scheduleFn == nil || !isConfigured || isRunning {
+		return "", false
+	}
+	sched := scheduleFn()
+	if sched == nil {
+		return "", false
+	}
+	next, err := sched.NextBackupTime()
+	if err != nil {
+		return "", false
+	}
+	return "Next backup: " + FormatNextBackup(next), true
+}
+
+// currentConfigError returns the current config error, or nil if the caller
+// did not provide a ConfigError getter or the getter returned nil.
+func (m *Menu) currentConfigError() error {
+	if m.cfg.ConfigError == nil {
+		return nil
+	}
+	return m.cfg.ConfigError()
+}
+
 // UpdateStatus refreshes the status menu item.
 func (m *Menu) UpdateStatus() {
 	if m.mStatus == nil {
+		return
+	}
+
+	if cfgErr := m.currentConfigError(); cfgErr != nil {
+		title, tooltip := statusLineForError(cfgErr)
+		m.mStatus.SetTitle(title)
+		m.mStatus.SetTooltip(tooltip)
+		// A config error overrides scheduler info — no useful "next backup" to show.
+		if m.mNextBackup != nil {
+			m.mNextBackup.Hide()
+		}
 		return
 	}
 
@@ -221,6 +305,18 @@ func (m *Menu) UpdateStatus() {
 	}
 
 	m.mStatus.SetTitle(title)
+	m.mStatus.SetTooltip("Backup status")
+
+	if m.mNextBackup == nil {
+		return
+	}
+	text, show := nextBackupMenuText(m.cfg.IsConfigured(), m.cfg.BackupState.IsRunning(), m.cfg.Schedule)
+	if show {
+		m.mNextBackup.SetTitle(text)
+		m.mNextBackup.Show()
+	} else {
+		m.mNextBackup.Hide()
+	}
 }
 
 // SetBackupRunning updates menu visibility for backup start/stop.

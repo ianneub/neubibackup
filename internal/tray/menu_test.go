@@ -2,7 +2,9 @@ package tray
 
 import (
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"neubibackup/internal/restic"
 	"neubibackup/internal/state"
@@ -244,3 +246,91 @@ func TestMockAutostart_ToggleError(t *testing.T) {
 // Note: Full Menu tests require systray which needs a display.
 // The tests above verify the configuration and mock objects work correctly.
 // Integration tests would be done manually or with a CI environment that has a display.
+
+type mockScheduleProvider struct {
+	next time.Time
+	err  error
+}
+
+func (m *mockScheduleProvider) NextBackupTime() (time.Time, error) {
+	return m.next, m.err
+}
+
+func fnReturning(p ScheduleProvider) func() ScheduleProvider {
+	return func() ScheduleProvider { return p }
+}
+
+func TestStatusLineForError(t *testing.T) {
+	t.Run("short error gets warning prefix and full tooltip", func(t *testing.T) {
+		title, tooltip := statusLineForError(errors.New("boom"))
+		if !strings.HasPrefix(title, "⚠ ") {
+			t.Errorf("title = %q, want warning-prefixed", title)
+		}
+		if !strings.Contains(title, "boom") {
+			t.Errorf("title = %q, want to contain error text", title)
+		}
+		if tooltip != "boom" {
+			t.Errorf("tooltip = %q, want full message", tooltip)
+		}
+	})
+
+	t.Run("long error truncates title but not tooltip", func(t *testing.T) {
+		long := strings.Repeat("x", statusLineMaxLen+50)
+		title, tooltip := statusLineForError(errors.New(long))
+		if !strings.HasSuffix(title, "…") {
+			t.Errorf("title = %q, want trailing ellipsis on overflow", title)
+		}
+		if tooltip != long {
+			t.Errorf("tooltip should preserve full message; got %d chars, want %d", len(tooltip), len(long))
+		}
+	})
+
+	t.Run("multi-line error collapses to one line in title", func(t *testing.T) {
+		err := errors.New("first line\nsecond line")
+		title, tooltip := statusLineForError(err)
+		if strings.Contains(title, "\n") {
+			t.Errorf("title = %q, must not contain newlines", title)
+		}
+		if !strings.Contains(title, "first line") || !strings.Contains(title, "second line") {
+			t.Errorf("title = %q, want to contain both lines joined", title)
+		}
+		if tooltip != "first line\nsecond line" {
+			t.Errorf("tooltip = %q, want preserved newlines", tooltip)
+		}
+	})
+}
+
+func TestNextBackupMenuText(t *testing.T) {
+	future := time.Now().Add(2 * time.Hour)
+	provider := &mockScheduleProvider{next: future}
+
+	tests := []struct {
+		name         string
+		isConfigured bool
+		isRunning    bool
+		scheduleFn   func() ScheduleProvider
+		wantShow     bool
+		wantPrefix   string
+	}{
+		{"shown when idle and configured", true, false, fnReturning(provider), true, "Next backup: "},
+		{"hidden while running", true, true, fnReturning(provider), false, ""},
+		{"hidden when not configured", false, false, fnReturning(provider), false, ""},
+		{"hidden when getter is nil", true, false, nil, false, ""},
+		{"hidden when getter returns nil", true, false, fnReturning(nil), false, ""},
+		{"hidden when provider errors", true, false, fnReturning(&mockScheduleProvider{err: errors.New("boom")}), false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text, show := nextBackupMenuText(tt.isConfigured, tt.isRunning, tt.scheduleFn)
+			if show != tt.wantShow {
+				t.Errorf("show = %v, want %v", show, tt.wantShow)
+			}
+			if tt.wantShow && !strings.HasPrefix(text, tt.wantPrefix) {
+				t.Errorf("text = %q, want prefix %q", text, tt.wantPrefix)
+			}
+			if !tt.wantShow && text != "" {
+				t.Errorf("text = %q, want empty", text)
+			}
+		})
+	}
+}

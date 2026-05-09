@@ -81,9 +81,11 @@ func FormatProgress(p *restic.BackupProgress) string {
 
 // FormatNextBackup returns a human-readable string for the next backup time.
 func FormatNextBackup(nextTime time.Time) string {
-	now := time.Now()
+	return formatNextBackupAt(nextTime, time.Now())
+}
 
-	if nextTime.Before(now) {
+func formatNextBackupAt(nextTime, now time.Time) string {
+	if !nextTime.After(now) {
 		return "Backup due"
 	}
 
@@ -105,5 +107,14 @@ func FormatNextBackup(nextTime time.Time) string {
 		return fmt.Sprintf("in %d hours", hours)
 	}
 
-	return fmt.Sprintf("at %s", nextTime.Format("3:04 PM"))
+	// Far future: distinguish "tomorrow" from "later this week or beyond".
+	nowDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	nextDay := time.Date(nextTime.Year(), nextTime.Month(), nextTime.Day(), 0, 0, 0, 0, nextTime.Location())
+	dayDelta := int(nextDay.Sub(nowDay).Hours() / 24)
+
+	if dayDelta == 1 {
+		return fmt.Sprintf("tomorrow at %s", nextTime.Format("3:04 PM"))
+	}
+
+	return fmt.Sprintf("on %s at %s", nextTime.Format("Mon Jan 2"), nextTime.Format("3:04 PM"))
 }

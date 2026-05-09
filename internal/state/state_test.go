@@ -86,73 +86,6 @@ func TestRecordFailure_Increment(t *testing.T) {
 	}
 }
 
-func TestHasBackedUpToday(t *testing.T) {
-	loc := time.Local
-
-	tests := []struct {
-		name             string
-		lastSuccess      time.Time
-		hasBackedUpToday bool
-	}{
-		{
-			name:             "zero time",
-			lastSuccess:      time.Time{},
-			hasBackedUpToday: false,
-		},
-		{
-			name:             "today",
-			lastSuccess:      time.Now(),
-			hasBackedUpToday: true,
-		},
-		{
-			name:             "yesterday",
-			lastSuccess:      time.Now().Add(-24 * time.Hour),
-			hasBackedUpToday: false,
-		},
-		{
-			name:             "earlier today",
-			lastSuccess:      time.Now().Add(-1 * time.Hour),
-			hasBackedUpToday: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &State{
-				Backup: BackupState{
-					LastSuccess: tt.lastSuccess,
-				},
-			}
-			result := s.HasBackedUpToday(loc)
-			if result != tt.hasBackedUpToday {
-				t.Errorf("HasBackedUpToday() = %v, want %v", result, tt.hasBackedUpToday)
-			}
-		})
-	}
-}
-
-func TestHasBackedUpToday_DifferentTimezone(t *testing.T) {
-	// Test that timezone is properly considered
-	loc, err := time.LoadLocation("UTC")
-	if err != nil {
-		t.Fatalf("Failed to load UTC timezone: %v", err)
-	}
-
-	// Create a time that's "today" in UTC
-	now := time.Now().In(loc)
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-
-	s := &State{
-		Backup: BackupState{
-			LastSuccess: todayStart.Add(1 * time.Hour), // 1am today in UTC
-		},
-	}
-
-	if !s.HasBackedUpToday(loc) {
-		t.Error("HasBackedUpToday() should be true for backup earlier today")
-	}
-}
-
 func TestLastSuccessAge(t *testing.T) {
 	t.Run("zero time returns zero", func(t *testing.T) {
 		s := &State{}
@@ -395,13 +328,13 @@ func TestConcurrentAccess(t *testing.T) {
 		}()
 	}
 
-	// Goroutines that read HasBackedUpToday
+	// Goroutines that read HasSuccessfulBackup
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := 0; j < numOperations; j++ {
-				_ = s.HasBackedUpToday(time.Local)
+				_ = s.HasSuccessfulBackup()
 			}
 		}()
 	}
@@ -552,72 +485,6 @@ func TestGetters(t *testing.T) {
 	}
 	if s.GetConsecutiveFailures() != 3 {
 		t.Errorf("GetConsecutiveFailures = %d, want 3", s.GetConsecutiveFailures())
-	}
-}
-
-func TestHasBackedUpTodayAfter(t *testing.T) {
-	loc := time.Local
-
-	tests := []struct {
-		name        string
-		lastSuccess time.Time
-		afterTime   time.Time
-		want        bool
-	}{
-		{
-			name:        "never backed up",
-			lastSuccess: time.Time{},
-			afterTime:   time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
-			want:        false,
-		},
-		{
-			name:        "backed up today after scheduled time",
-			lastSuccess: time.Date(2025, 1, 1, 10, 0, 0, 0, loc),
-			afterTime:   time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
-			want:        true,
-		},
-		{
-			name:        "backed up today before scheduled time",
-			lastSuccess: time.Date(2025, 1, 1, 8, 0, 0, 0, loc),
-			afterTime:   time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
-			want:        false,
-		},
-		{
-			name:        "backed up today at exactly scheduled time",
-			lastSuccess: time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
-			afterTime:   time.Date(2025, 1, 1, 9, 0, 0, 0, loc),
-			want:        true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &State{
-				Backup: BackupState{
-					LastSuccess: tt.lastSuccess,
-				},
-			}
-
-			// For the "today" check to work, we need to test with current date
-			// So we'll adjust the test dates to be relative to now
-			now := time.Now().In(loc)
-			if !tt.lastSuccess.IsZero() {
-				// Adjust lastSuccess to be today at the same hour/minute
-				s.Backup.LastSuccess = time.Date(
-					now.Year(), now.Month(), now.Day(),
-					tt.lastSuccess.Hour(), tt.lastSuccess.Minute(), 0, 0, loc,
-				)
-			}
-			afterTime := time.Date(
-				now.Year(), now.Month(), now.Day(),
-				tt.afterTime.Hour(), tt.afterTime.Minute(), 0, 0, loc,
-			)
-
-			got := s.HasBackedUpTodayAfter(loc, afterTime)
-			if got != tt.want {
-				t.Errorf("HasBackedUpTodayAfter() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 

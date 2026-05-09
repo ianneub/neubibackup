@@ -205,46 +205,36 @@ func TestFormatProgress(t *testing.T) {
 }
 
 func TestFormatNextBackup(t *testing.T) {
-	tests := []struct {
-		name     string
-		offset   time.Duration
-		want     string
-	}{
-		{
-			name:   "past due",
-			offset: -1 * time.Hour,
-			want:   "Backup due",
-		},
-		{
-			name:   "in 1 minute",
-			offset: 30 * time.Second,
-			want:   "in 1 minute",
-		},
-		{
-			name:   "in 5 minutes",
-			offset: 5*time.Minute + 30*time.Second, // add buffer for test execution time
-			want:   "in 5 minutes",
-		},
-		{
-			name:   "in 1 hour",
-			offset: 1*time.Hour + 30*time.Second,
-			want:   "in 1 hour",
-		},
-		{
-			name:   "in 3 hours",
-			offset: 3*time.Hour + 30*time.Second,
-			want:   "in 3 hours",
-		},
-	}
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC) // Saturday noon
 
+	tests := []struct {
+		name string
+		next time.Time
+		want string
+	}{
+		{"past due", now.Add(-1 * time.Hour), "Backup due"},
+		{"now (boundary)", now, "Backup due"},
+		{"in 1 minute", now.Add(30 * time.Second), "in 1 minute"},
+		{"in 5 minutes", now.Add(5 * time.Minute), "in 5 minutes"},
+		{"in 1 hour", now.Add(time.Hour + time.Second), "in 1 hour"},
+		{"in 3 hours", now.Add(3*time.Hour + time.Second), "in 3 hours"},
+		{"tomorrow at 3 PM", time.Date(2026, 5, 10, 15, 4, 0, 0, time.UTC), "tomorrow at 3:04 PM"},
+		{"3 days out", time.Date(2026, 5, 12, 15, 4, 0, 0, time.UTC), "on Tue May 12 at 3:04 PM"},
+		{"a week out", time.Date(2026, 5, 16, 9, 30, 0, 0, time.UTC), "on Sat May 16 at 9:30 AM"},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Calculate nextTime fresh for each test to avoid timing issues
-			nextTime := time.Now().Add(tt.offset)
-			got := FormatNextBackup(nextTime)
-			if got != tt.want {
-				t.Errorf("FormatNextBackup() = %q, want %q", got, tt.want)
+			if got := formatNextBackupAt(tt.next, now); got != tt.want {
+				t.Errorf("formatNextBackupAt() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFormatNextBackup_PublicWrapper(t *testing.T) {
+	// Smoke check that the public wrapper works against time.Now() without panic.
+	got := FormatNextBackup(time.Now().Add(-time.Hour))
+	if got != "Backup due" {
+		t.Errorf("FormatNextBackup(past) = %q, want %q", got, "Backup due")
 	}
 }

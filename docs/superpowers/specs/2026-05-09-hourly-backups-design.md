@@ -18,6 +18,7 @@ Users want backups more frequent than once per day (notably hourly), and some us
 - Reject configurations whose minimum gap between consecutive fires is below 15m (the scheduler ticker floor) at config-load time, with a clear error message.
 - Remove the daily-anchor scheduling code path entirely; one mechanism, one code path.
 - Preserve existing pre-flight gates (battery, allowed SSIDs, idle limit) and manual-trigger behavior.
+- Surface the next scheduled backup time as a new disabled menu item directly under the existing "Last backup: …" line.
 
 ## Non-goals
 
@@ -277,9 +278,77 @@ schedule:
 
 ### Tray / status
 
-`FormatStatus` already prints "Last backup: 23m ago", which works at any cadence. `FormatNextBackup` keeps working because `NextBackupTime` still returns a usable time.
+`FormatStatus` already prints "Last backup: 23m ago" — unchanged.
 
-No tray code changes are required for this feature.
+**New: "Next backup: …" menu item.** Add a second disabled menu item directly below `mStatus` showing when the next scheduled run will fire.
+
+#### Menu wiring (`internal/tray/menu.go`)
+
+- Add a new field to `Menu`: `mNextBackup *systray.MenuItem`.
+- In `setup()`, immediately after `m.mStatus.Disable()` and *before* `systray.AddSeparator()`:
+
+  ```go
+  m.mNextBackup = systray.AddMenuItem("", "Next scheduled backup")
+  m.mNextBackup.Disable()
+  if !isConfigured {
+      m.mNextBackup.Hide()
+  }
+  ```
+
+- Add a new field to `MenuConfig`:
+
+  ```go
+  // ScheduleProvider provides the next scheduled backup time.
+  type ScheduleProvider interface {
+      NextBackupTime() (time.Time, error)
+  }
+  Schedule ScheduleProvider
+  ```
+
+- Update `Menu.UpdateStatus()` to also refresh the next-backup line:
+
+  ```go
+  func (m *Menu) UpdateStatus() {
+      // ... existing mStatus update ...
+
+      if m.mNextBackup == nil || m.cfg.Schedule == nil {
+          return
+      }
+      if !m.cfg.IsConfigured() || m.cfg.BackupState.IsRunning() {
+          m.mNextBackup.Hide()
+          return
+      }
+      next, err := m.cfg.Schedule.NextBackupTime()
+      if err != nil {
+          m.mNextBackup.Hide()
+          return
+      }
+      m.mNextBackup.SetTitle("Next backup: " + FormatNextBackup(next))
+      m.mNextBackup.Show()
+  }
+  ```
+
+- `SetBackupRunning(true)` hides the line; `SetBackupRunning(false)` defers visibility to the next `UpdateStatus()` (which the existing 1-minute status ticker in `app.go:217` already drives, plus the explicit `updateStatus()` calls after backup start/stop).
+- `RefreshOnConfigChange()` calls `UpdateStatus()` already, so config reloads naturally pick up new schedule expressions.
+
+#### Formatter (`internal/tray/status.go`)
+
+`FormatNextBackup` works as-is for sub-24h windows. To handle cron expressions with sparse fires (e.g. weekly cron), extend the > 24h branch:
+
+- `until < 48h && tomorrow` → `"tomorrow at 3:04 PM"`
+- `until >= 48h` → `"on Mon Apr 30 at 3:04 PM"`
+
+Implementation: compare `nextTime.YearDay()` to today's; if same day → already covered by sub-24h branch; if next day → "tomorrow"; otherwise → format with `"Mon Jan 2 at 3:04 PM"` (or `"on Mon Jan 2 at 3:04 PM"` for clarity).
+
+#### App wiring (`internal/app/app.go`)
+
+When constructing `MenuConfig`, pass the scheduler as the `Schedule` provider:
+
+```go
+Schedule: a.scheduler,   // *scheduler.Scheduler already exposes NextBackupTime
+```
+
+The existing 1-minute `statusTicker` (`app.go:217`) drives the refresh; no new ticker is needed. The "in 35 minutes" → "in 34 minutes" tick happens at the same cadence as the "Last backup" line.
 
 ### README
 
@@ -350,6 +419,22 @@ For tests that need to control "now", inject a clock or use fixed `lastSuccess` 
 - Update existing `CleanupOldLogs` tests for the new `(maxFiles int)` signature.
 - Add `RetentionFor` table tests: 24h → 25, 1h → 168, 30m → 336, 15m → 500 (clamped at the cap).
 
+### `internal/tray/status_test.go`
+
+- `FormatNextBackup` table additions:
+  - 26h ahead, on the next calendar day → `"tomorrow at 3:04 PM"` (use a fixed reference time).
+  - 3 days ahead → `"on <Weekday Month Day> at 3:04 PM"`.
+  - Existing sub-24h cases remain unchanged.
+
+### `internal/tray/menu_test.go`
+
+- `Menu.UpdateStatus` shows the new "Next backup: …" line when `IsConfigured && !BackupState.IsRunning()`, with text starting with `"Next backup: "`.
+- `Menu.UpdateStatus` hides the line when `BackupState.IsRunning()` is true.
+- `Menu.UpdateStatus` hides the line when `IsConfigured` returns false.
+- `SetBackupRunning(true)` / `SetBackupRunning(false)` round-trip leaves the next-backup line in the correct visibility state after the next `UpdateStatus()`.
+- `RefreshOnConfigChange` re-evaluates visibility (e.g. config goes from unconfigured → configured).
+- The mocked `ScheduleProvider` returns a fixed `time.Time`; we assert on the prefix and that the formatter is being invoked.
+
 ### Manual smoke
 
 - Build, set `cron: "@every 1h"` in `.dev-data/config.yaml`, run, observe a backup at startup if `LastSuccess` is older than 1h, and a second backup ~1h later (advance by sleeping a laptop or by manually editing `state.yaml`'s `last_success`).
@@ -368,7 +453,11 @@ For tests that need to control "now", inject a clock or use fixed `lastSuccess` 
 - `internal/state/state_test.go` — drop matching tests.
 - `internal/logging/logging.go` — change `CleanupOldLogs` signature to take a `maxFiles int`, add `RetentionFor(time.Duration) int`.
 - `internal/logging/logging_test.go` — update existing tests for the new signature, add table tests for `RetentionFor`.
-- `internal/app/app.go` — call `logging.CleanupOldLogs(logging.RetentionFor(a.scheduler.MinGap()))` at every existing `CleanupOldLogs` call site.
+- `internal/app/app.go` — call `logging.CleanupOldLogs(logging.RetentionFor(a.scheduler.MinGap()))` at every existing `CleanupOldLogs` call site; pass `a.scheduler` as the `Schedule` field of `MenuConfig`.
+- `internal/tray/menu.go` — add `mNextBackup` item, `Schedule ScheduleProvider` to `MenuConfig`, update `UpdateStatus` and `setup()`.
+- `internal/tray/menu_test.go` — visibility and content tests for the new menu line.
+- `internal/tray/status.go` — extend `FormatNextBackup` with "tomorrow" and "on <weekday>" branches.
+- `internal/tray/status_test.go` — table cases for the new formatter branches.
 - `README.md` — rewrite schedule docs, add v1 → v2 migration section.
 - `CHANGELOG.md` (or release notes) — document the breaking change and migration steps.
 

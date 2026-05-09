@@ -22,10 +22,10 @@ inherits access.
   `ErrUnsupported` on non-darwin/non-windows platforms so dev cross-builds stay
   green.
 - Migrating existing users. New mode is opt-in via config.
-- **Changes to `.github/workflows/release.yml` to switch from ad-hoc
-  signing to Developer ID signing + notarization.** Tracked separately and
-  out of scope for this work. See "Assumptions" below for what this design
-  takes as given.
+- Apple Developer ID signing or notarization. The project deliberately stays
+  off Apple's paid program. macOS releases will be signed with a stable
+  self-signed cert (see "Release signing" below); Gatekeeper still treats
+  the app as "from an unidentified developer," same as today's ad-hoc state.
 
 ## Background
 
@@ -52,35 +52,12 @@ To get app-scoped access on macOS, neubibackup must call `Security.framework`
 APIs directly so the ACL binds to neubibackup's own designated requirement
 (DR). For that DR to be **stable across releases** — so users approve once
 and stay approved through future auto-updates — the binary needs to be signed
-with a stable identity (Apple Developer ID), not ad-hoc.
+with a stable identity. A self-signed code-signing cert reused across every
+release satisfies this; Apple Developer ID is *not* required.
 
 Windows Credential Manager has no per-app ACL; the protection there is DPAPI
 at rest plus login-session gating, which we get for free by using the Win32
 Credential Manager API.
-
-## Assumptions
-
-This design assumes — but does **not** itself implement — that a future
-release-workflow change moves macOS builds from ad-hoc signing
-(`codesign --sign -`) to **Developer ID Application** signing with the
-hardened runtime and notarization. Specifically:
-
-- macOS releases will be signed with a stable certificate identity
-  (`Developer ID Application: <Org> (<TeamID>)`), giving every release the
-  same designated requirement.
-- The `creativeprojects/go-selfupdate` flow will continue to work because
-  every published artifact carries a matching, notarized signature.
-
-The keychain feature **functions correctly under ad-hoc signing too** — the
-`Security.framework` calls succeed, the ACL is just bound to the current
-binary's cdhash. The practical consequence on ad-hoc builds: the user gets a
-Keychain prompt the first time *each new build* of neubibackup tries to read
-the password, because the cdhash (and therefore the DR) changes every build.
-Approving once per dev rebuild or once per ad-hoc release is workable for
-testing this feature in development, but it is not the intended end-user
-experience. Documentation will note this and recommend that users wait for
-the signed-release rollout before opting into `use_keychain: true` if they
-care about silent operation. No code branches on signing status.
 
 ## Design
 
@@ -271,6 +248,104 @@ already uses for similar startup errors.
 
 `IsConfigured()` is unchanged — repo path is still the gate.
 
+### Release signing (macOS)
+
+The macOS release workflow switches from ad-hoc signing
+(`codesign --sign -`) to a stable self-signed cert. The cert is used for
+every release in perpetuity; it is the linchpin of the keychain ACL story.
+
+**Cert generation (one-time, manual, performed by maintainer):**
+
+A self-signed code-signing cert with these properties:
+
+- Type: X.509 with `extKeyUsage = codeSigning`
+- Key: RSA 2048 or ECDSA P-256 (either is fine; ECDSA produces smaller
+  signatures)
+- Common Name: `NeubiBackup Code Signing` (or similar; cosmetic only — the
+  DR uses the cert hash, not the name)
+- Validity: 100 years (self-signed has no real expiration constraint;
+  long-dated keeps the option of skipping `--timestamp`)
+- Exported as a password-protected `.p12`
+
+Generation may use Keychain Access ("Create a Certificate" → Type:
+`Code Signing`, Identity Type: `Self Signed Root`) or `openssl` +
+`security import`. The implementation plan picks one method and documents
+the exact commands.
+
+**Cert storage:**
+
+- Primary copy: GitHub repository secret `MACOS_CERT_P12_BASE64` (base64 of
+  the `.p12`) plus `MACOS_CERT_PASSWORD`.
+- Backup copy: maintainer's password manager and an offline backup
+  (encrypted USB or printout of the base64). The cert *cannot* be
+  regenerated identically — losing it forces every existing user to
+  re-approve their keychain entry on the next release.
+- The cert's SHA-1 hash is committed to the repo as a public reference
+  value (so future maintainers can verify which cert produced a given
+  signature). Documented in `docs/release-signing.md` (new file).
+
+**Workflow change in `.github/workflows/release.yml`:**
+
+Before the existing "Sign app bundle" step (line 148), add:
+
+```yaml
+- name: Import code-signing cert
+  env:
+    P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+    P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+  run: |
+    echo "$P12_BASE64" | base64 --decode > cert.p12
+    security create-keychain -p "" build.keychain
+    security default-keychain -s build.keychain
+    security unlock-keychain -p "" build.keychain
+    security import cert.p12 -k build.keychain -P "$P12_PASSWORD" \
+      -T /usr/bin/codesign
+    security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+    rm cert.p12
+```
+
+Replace the "Sign app bundle" step body with:
+
+```bash
+codesign --force --deep --sign "NeubiBackup Code Signing" NeubiBackup.app
+codesign --verify --deep --strict --verbose=2 NeubiBackup.app
+codesign -dv --verbose=4 NeubiBackup.app
+```
+
+Notes:
+
+- No `--options runtime` (hardened runtime). It buys nothing without
+  notarization and can break Go programs.
+- No `--timestamp`. The 100-year cert lifetime makes timestamping
+  unnecessary; can be added later if desired.
+- `--deep` recursively signs the embedded restic binary. The plan should
+  spot-check that `codesign --verify` validates the inner binary.
+
+**Bundle identifier and DR shape:**
+
+The existing `Info.plist` already sets `CFBundleIdentifier` to
+`com.neubibackup.app`. The DR after signing will resolve to roughly:
+
+```
+identifier "com.neubibackup.app" and certificate root = H"<cert SHA-1>"
+```
+
+Both halves are stable across releases as long as the cert is reused. The
+keychain feature relies on this shape; if `CFBundleIdentifier` ever
+changes, every existing keychain ACL becomes invalid. Treated as a
+versioned constant, like a database schema.
+
+**Local dev builds:**
+
+`scripts/build-dev-app.sh` keeps `codesign --sign -` (ad-hoc). Developers
+testing the keychain feature locally will see a prompt every rebuild
+because the cdhash changes. Acceptable for development; the in-memory
+test backend (see "Tests" below) is the primary harness for the keychain
+package, so most testing doesn't even touch the real keychain.
+
+**Windows:** unchanged. Wincred has no per-app ACL; signing affects
+nothing about credential persistence.
+
 ## Tests
 
 Required per `CLAUDE.md`. Concretely:
@@ -317,32 +392,23 @@ Update `README.md`:
   `set-password` subcommand.
 - Tray menu section: list the two new entries.
 - Troubleshooting:
-  - "macOS prompts on every update" — note this is expected on ad-hoc
-    releases (current state) and resolves once the project ships
-    Developer-ID-signed releases. Recommend `password_command` in the
-    interim if silent operation matters.
-  - "Password prompt after rebuilding from source" — code-signature change,
-    click "Always Allow" once or re-run `set-password`.
+  - "Password prompt after rebuilding from source" — local dev builds are
+    ad-hoc signed, so the cdhash changes every build. Click "Always Allow"
+    once or re-run `set-password`. Does not affect installed releases.
   - "Keychain not available on Linux" — by design.
   - macOS: explicit comparison with `password_command: security ...` and why
-    `use_keychain` is preferred (assuming a signed release).
+    `use_keychain` is preferred.
 
 ## Risks / Open Questions
 
-- **Pre-signing UX.** Until the release workflow switches to Developer ID
-  signing, every ad-hoc release has a different cdhash and therefore a
-  different DR. Users opting into `use_keychain: true` on ad-hoc releases will
-  see a Keychain prompt at every auto-update. README will warn about this
-  and recommend either waiting for the signed-release rollout or sticking
-  with `password_command` in the meantime. The feature is shipped now so the
-  signed-release rollout has nothing to integrate later — it just becomes
-  better.
-- **One-time prompt at the signing cutover.** Users who set the password on
-  the last ad-hoc release will get one final prompt on the first signed
-  release (cdhash → Team-ID-based DR transition). After they click
-  "Always Allow" once on the signed binary, future signed releases are
-  silent. Documented in the release notes for whichever version flips the
-  signing.
+- **Cert loss is unrecoverable.** The self-signed cert's hash is baked into
+  every existing user's keychain ACL. If the `.p12` is lost, the next
+  release signs with a different cert hash, no existing keychain entry
+  matches, and every user gets a one-time prompt to re-approve. There is
+  no way to "regenerate the same self-signed cert" — its hash is a function
+  of the (unrecoverable) private key. Mitigated by storing the `.p12` in
+  the maintainer's password manager and an offline backup in addition to
+  the GitHub secret.
 - **`keybase/go-keychain` maintenance.** Active enough for our needs (used by
   Keybase, 1Password CLI, others). If it stagnates, the wrapper surface is
   small (~3 calls); we can replace with a thin direct cgo binding.
@@ -353,6 +419,10 @@ Update `README.md`:
   on macOS (after tray). The Linux/CGO_ENABLED=0 docker path is unaffected
   thanks to the `keychain_other.go` stub. CI already builds on macOS/Windows
   runners; no new CI surface.
+- **Gatekeeper UX is unchanged.** Self-signing does not get past Gatekeeper's
+  "unidentified developer" warning on first launch. Same as today's ad-hoc
+  state. Users still right-click → Open the first time. Documented in the
+  README's installation section (existing copy already covers this).
 
 ## Out of Scope (for v1)
 
@@ -361,6 +431,5 @@ Update `README.md`:
 - GUI-based password change without going through the tray (e.g., a settings
   window). The tray prompt is sufficient.
 - Linux Secret Service support.
-- **Release-workflow changes for Developer ID signing + notarization.** The
-  feature ships first; the signing workflow lands separately when the Apple
-  developer-account work is finished.
+- Apple Developer ID signing, hardened runtime, notarization, stapling. Not
+  planned.

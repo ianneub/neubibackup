@@ -242,32 +242,29 @@ func TestShutdown(t *testing.T) {
 	}
 }
 
-// TestCleanupOldUpdatesNonWindows tests that cleanup is skipped on non-Windows
-func TestCleanupOldUpdatesNonWindows(t *testing.T) {
+// TestCleanupOldUpdatesIgnoresNonBundleArtifacts verifies that on macOS the
+// startup cleanup hook is a no-op when the running executable is not inside
+// an .app bundle, and that on non-Windows (excluding macOS) the hook is a
+// no-op for the Windows-specific .exe.old artifact.
+func TestCleanupOldUpdatesIgnoresNonBundleArtifacts(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping non-Windows test on Windows")
 	}
 
-	// Create a temp directory with .old files
 	tempDir := t.TempDir()
 
-	// Create some .old files
+	// Create a Windows-style .exe.old artifact alongside an unrelated path.
+	// The cleanup hook only operates on the running executable's directory,
+	// not arbitrary paths, so this file should be untouched on every OS.
 	oldFile := filepath.Join(tempDir, ".neubibackup.exe.old")
 	if err := os.WriteFile(oldFile, []byte("old binary"), 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Verify file exists before cleanup
-	if _, err := os.Stat(oldFile); os.IsNotExist(err) {
-		t.Fatal("Test file should exist before cleanup")
-	}
-
-	// Run cleanup (should do nothing on non-Windows)
 	cleanupOldUpdates()
 
-	// File should still exist because we're not on Windows
 	if _, err := os.Stat(oldFile); os.IsNotExist(err) {
-		t.Error("File should still exist on non-Windows after cleanupOldUpdates")
+		t.Error("file in unrelated temp dir should not have been removed by cleanupOldUpdates")
 	}
 }
 

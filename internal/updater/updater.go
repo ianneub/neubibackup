@@ -4,8 +4,10 @@ package updater
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"runtime"
+	"strings"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/creativeprojects/go-selfupdate"
@@ -71,6 +73,18 @@ func isValidSemver(version string) bool {
 	return err == nil
 }
 
+// readAssetBytes downloads a release asset via the given source and returns
+// its bytes. Extracted from DownloadAndApply so the asset-download logic is
+// testable without hitting the network.
+func readAssetBytes(ctx context.Context, source selfupdate.Source, rel *selfupdate.Release) ([]byte, error) {
+	rc, err := source.DownloadReleaseAsset(ctx, rel, rel.AssetID)
+	if err != nil {
+		return nil, fmt.Errorf("download release asset: %w", err)
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
+}
+
 // DownloadAndApply downloads the latest update and applies it.
 // The application should restart after this completes successfully.
 func (u *Updater) DownloadAndApply(ctx context.Context) error {
@@ -101,21 +115,27 @@ func (u *Updater) DownloadAndApply(ctx context.Context) error {
 
 	slog.Info("Updating", "from", u.currentVersion, "to", latest.Version())
 
-	// Get the executable path
 	exe, err := selfupdate.ExecutablePath()
 	if err != nil {
 		return fmt.Errorf("getting executable path: %w", err)
 	}
 
-	// On macOS, we need to update the .app bundle, not just the binary
-	// go-selfupdate handles this when the asset is a ZIP containing the .app
-	if runtime.GOOS == "darwin" {
-		slog.Info("Updating macOS app bundle", "path", exe)
+	if runtime.GOOS == "darwin" && !strings.HasSuffix(strings.ToLower(latest.AssetName), ".zip") {
+		return fmt.Errorf("expected .zip release asset for darwin, got %q", latest.AssetName)
 	}
 
-	// Download and apply the update
-	if err := updater.UpdateTo(ctx, latest, exe); err != nil {
-		return fmt.Errorf("applying update: %w", err)
+	if runtime.GOOS == "darwin" {
+		slog.Info("Updating macOS app bundle", "path", exe)
+		fetch := func(ctx context.Context) ([]byte, error) {
+			return readAssetBytes(ctx, source, latest)
+		}
+		if err := applyDarwinBundleUpdate(ctx, fetch, exe); err != nil {
+			return fmt.Errorf("applying darwin update: %w", err)
+		}
+	} else {
+		if err := updater.UpdateTo(ctx, latest, exe); err != nil {
+			return fmt.Errorf("applying update: %w", err)
+		}
 	}
 
 	slog.Info("Update completed successfully", "version", latest.Version())

@@ -358,7 +358,7 @@ Then relaunch the app.
 
 ### App Bundle Updates
 
-Auto-updates on macOS only update the executable binary, not the full app bundle. If a new version adds features requiring macOS permissions (like Location Services for WiFi SSID detection), you'll need to manually reinstall from the DMG to get the updated Info.plist with the new permission descriptions.
+On macOS, automatic updates replace the entire `NeubiBackup.app` bundle (not just the inner binary). This keeps the bundle's code signature valid after every update so the Keychain ACL behind `use_keychain` stays usable without re-prompting, and Info.plist updates (e.g., new permission descriptions) ship as part of the update.
 
 ## License
 

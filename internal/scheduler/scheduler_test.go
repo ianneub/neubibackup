@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -8,6 +10,19 @@ import (
 	"neubibackup/internal/config"
 	"neubibackup/internal/state"
 )
+
+func TestMain(m *testing.M) {
+	// Redirect state.Save() (used by checkAndTrigger) to a temp directory so
+	// scheduler tests never touch real user data.
+	tmpDir, err := os.MkdirTemp("", "neubibackup-scheduler-test-*")
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Setenv("NEUBIBACKUP_APP_DIR", filepath.Join(tmpDir, "data"))
+	code := m.Run()
+	os.RemoveAll(tmpDir)
+	os.Exit(code)
+}
 
 func newTestConfig(crontab string) *config.Config {
 	return &config.Config{
@@ -242,6 +257,122 @@ func TestNextBackupTime_TickAligned_OverdueReturnsNextTick(t *testing.T) {
 	want := now.Add(7 * time.Minute)
 	if delta := got.Sub(want); delta > time.Second || delta < -time.Second {
 		t.Errorf("NextBackupTime() overdue = %s, want ~%s (delta %s)", got, want, delta)
+	}
+}
+
+func TestIsBackupDue_PrefersScheduledFireOverSuccess(t *testing.T) {
+	// LastScheduledFire is the authoritative anchor. LastSuccess is older here
+	// (e.g. backup ran for several minutes), but the schedule should be
+	// computed from when the schedule fired, not when the backup completed.
+	now := time.Now()
+	st := &state.State{}
+	st.Backup.LastScheduledFire = now.Add(-30 * time.Minute) // 30m ago
+	st.Backup.LastSuccess = now.Add(-25 * time.Minute)       // 25m ago (5m backup duration)
+
+	s, err := New(newTestConfig("@every 1h"), st, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.Lock()
+	due := s.isBackupDue()
+	s.mu.Unlock()
+
+	// Anchored on LastScheduledFire (30m ago), next fire is in 30m → not due.
+	// If we incorrectly anchored on LastSuccess (25m ago), next fire would be
+	// in 35m and we'd still get false here — so also check the precise next
+	// time below.
+	if due {
+		t.Error("isBackupDue() = true with LastScheduledFire 30m ago / @every 1h, want false")
+	}
+
+	got, err := s.NextBackupTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := time.Until(got)
+	// Anchor = LastScheduledFire (30m ago) + 1h = 30m from now.
+	// Anchor = LastSuccess (25m ago) + 1h = 35m from now (the bug).
+	if until > 32*time.Minute {
+		t.Errorf("NextBackupTime() = %s away, want ~30m (anchored on LastScheduledFire); >32m suggests fallback to LastSuccess",
+			until)
+	}
+}
+
+func TestIsBackupDue_FallsBackToLastSuccess(t *testing.T) {
+	// Migration path: state files written before LastScheduledFire was added
+	// have only LastSuccess. The scheduler must still compute the next fire.
+	now := time.Now()
+	st := &state.State{}
+	st.Backup.LastSuccess = now.Add(-2 * time.Hour) // 2h ago, no LastScheduledFire
+
+	s, err := New(newTestConfig("@every 1h"), st, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.Lock()
+	due := s.isBackupDue()
+	s.mu.Unlock()
+
+	if !due {
+		t.Error("isBackupDue() = false with LastSuccess 2h ago and zero LastScheduledFire, want true (migration fallback)")
+	}
+}
+
+func TestCheckAndTrigger_RecordsScheduledFire(t *testing.T) {
+	st := &state.State{}
+	st.Backup.LastScheduledFire = time.Now().Add(-2 * time.Hour) // overdue
+
+	fired := make(chan struct{})
+	s, err := New(newTestConfig("@every 1h"), st, func() {
+		close(fired)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before := time.Now()
+	s.checkAndTrigger()
+
+	select {
+	case <-fired:
+	case <-time.After(time.Second):
+		t.Fatal("onBackup was not invoked within 1s")
+	}
+
+	got := st.GetLastScheduledFire()
+	if got.Before(before) {
+		t.Errorf("LastScheduledFire = %v, expected to be updated to >= %v", got, before)
+	}
+}
+
+func TestCheckAndTrigger_DoesNotDriftWithBackupDuration(t *testing.T) {
+	// Reproduces the bug this change fixes: with the old anchor (LastSuccess),
+	// each cycle's "next fire" was computed from when the previous backup
+	// COMPLETED, so backup duration cumulatively pushed the schedule forward.
+	// With LastScheduledFire as the anchor, the next fire is computed from
+	// when the previous schedule FIRED, regardless of how long the backup ran.
+	now := time.Now()
+	st := &state.State{}
+	st.Backup.LastScheduledFire = now.Add(-1 * time.Hour) // fired exactly 1h ago
+	// Simulate a long-running backup: success was recorded 5 min after the fire.
+	st.Backup.LastSuccess = now.Add(-1*time.Hour + 5*time.Minute)
+
+	s, err := New(newTestConfig("@every 1h"), st, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.NextBackupTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := time.Until(got)
+	// Anchored on LastScheduledFire: next fire is now-ish (1h after fire). The
+	// 5-min backup duration must not push it to "in 5 minutes".
+	if until > 2*time.Minute {
+		t.Errorf("NextBackupTime() = %s away, want ~0 (overdue). Drift suggests anchor is LastSuccess, not LastScheduledFire", until)
 	}
 }
 

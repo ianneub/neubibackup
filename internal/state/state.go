@@ -17,6 +17,11 @@ import (
 type BackupState struct {
 	LastAttempt         time.Time `yaml:"last_attempt"`
 	LastSuccess         time.Time `yaml:"last_success"`
+	// LastScheduledFire is when the scheduler last decided to fire a backup,
+	// independent of the backup's outcome or duration. This is the anchor for
+	// `@every X` cron schedules so the next fire is computed from the previous
+	// fire, not from when the previous backup completed.
+	LastScheduledFire   time.Time `yaml:"last_scheduled_fire,omitempty"`
 	LastError           string    `yaml:"last_error"`
 	ConsecutiveFailures int       `yaml:"consecutive_failures"`
 }
@@ -198,6 +203,24 @@ func (s *State) GetLastSuccess() time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Backup.LastSuccess
+}
+
+// RecordScheduledFire records that the scheduler has decided to fire a backup
+// (regardless of subsequent success or failure). This timestamp is the anchor
+// for cron schedules, so the next fire time doesn't drift with backup duration.
+func (s *State) RecordScheduledFire() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Backup.LastScheduledFire = time.Now()
+}
+
+// GetLastScheduledFire returns the time the scheduler last fired a backup.
+// Returns the zero time if the scheduler has never fired a backup (e.g. on
+// first run or after upgrading from a version without this tracking).
+func (s *State) GetLastScheduledFire() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Backup.LastScheduledFire
 }
 
 // GetConsecutiveFailures returns the number of consecutive backup failures.

@@ -170,7 +170,12 @@ func (s *Scheduler) checkAndTrigger() {
 	}
 
 	s.running = true
+	s.state.RecordScheduledFire()
 	s.mu.Unlock()
+
+	if err := s.state.Save(); err != nil {
+		slog.Error("Failed to persist scheduled fire time", "error", err)
+	}
 
 	go func() {
 		defer func() {
@@ -201,15 +206,26 @@ func (s *Scheduler) shouldRunNow() bool {
 }
 
 // isBackupDue returns true if the schedule has fired at least once since the
-// last successful backup (or ever, if no successful backup has happened).
+// scheduler last fired a backup (or ever, if it has never fired).
 // Must be called with mu held.
 func (s *Scheduler) isBackupDue() bool {
-	last := s.state.GetLastSuccess()
+	last := s.scheduleAnchor()
 	if last.IsZero() {
 		return true
 	}
 	next := s.schedule.Next(last)
 	return !time.Now().Before(next)
+}
+
+// scheduleAnchor returns the timestamp used as the "previous fire" reference
+// for cron computations. Prefers LastScheduledFire (set whenever the scheduler
+// fires a backup, independent of duration or outcome). Falls back to
+// LastSuccess for state files written before LastScheduledFire was introduced.
+func (s *Scheduler) scheduleAnchor() time.Time {
+	if t := s.state.GetLastScheduledFire(); !t.IsZero() {
+		return t
+	}
+	return s.state.GetLastSuccess()
 }
 
 // checkBatteryOK returns true if battery status allows backup to proceed.
@@ -283,7 +299,7 @@ func (s *Scheduler) NextBackupTime() (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	last := s.state.GetLastSuccess()
+	last := s.scheduleAnchor()
 	if last.IsZero() {
 		return time.Now(), nil
 	}

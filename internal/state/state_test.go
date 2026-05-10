@@ -74,6 +74,32 @@ func TestRecordFailure(t *testing.T) {
 	}
 }
 
+func TestRecordScheduledFire(t *testing.T) {
+	s := &State{}
+
+	if got := s.GetLastScheduledFire(); !got.IsZero() {
+		t.Errorf("GetLastScheduledFire() before any fire = %v, want zero", got)
+	}
+
+	before := time.Now()
+	s.RecordScheduledFire()
+	after := time.Now()
+
+	got := s.GetLastScheduledFire()
+	if got.Before(before) || got.After(after) {
+		t.Errorf("GetLastScheduledFire() = %v, should be between %v and %v", got, before, after)
+	}
+
+	// RecordScheduledFire must not touch LastSuccess / LastAttempt — those track
+	// the outcome of a backup, not the schedule firing.
+	if !s.Backup.LastSuccess.IsZero() {
+		t.Errorf("LastSuccess = %v, want zero (RecordScheduledFire should not set it)", s.Backup.LastSuccess)
+	}
+	if !s.Backup.LastAttempt.IsZero() {
+		t.Errorf("LastAttempt = %v, want zero (RecordScheduledFire should not set it)", s.Backup.LastAttempt)
+	}
+}
+
 func TestRecordFailure_Increment(t *testing.T) {
 	s := &State{}
 

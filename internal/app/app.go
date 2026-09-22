@@ -574,29 +574,12 @@ func (a *App) watchConfigFile() {
 		return
 	}
 
-	if err := a.configWatcher.Add(configPath); err != nil {
+	err = watchConfig(a.ctx, a.configWatcher, configPath, configReloadDebounce, func() {
+		slog.Info("Config file changed, reloading...")
+		a.ReloadConfig()
+	})
+	if err != nil {
 		slog.Error("Error watching config file", "error", err)
-		return
-	}
-
-	for {
-		select {
-		case <-a.ctx.Done():
-			return
-		case event, ok := <-a.configWatcher.Events:
-			if !ok {
-				return
-			}
-			if event.Op&fsnotify.Write == fsnotify.Write {
-				slog.Info("Config file changed, reloading...")
-				a.ReloadConfig()
-			}
-		case err, ok := <-a.configWatcher.Errors:
-			if !ok {
-				return
-			}
-			slog.Error("Config watcher error", "error", err)
-		}
 	}
 }
 

@@ -4,10 +4,11 @@ Cross-platform backup scheduler wrapping restic.
 
 ## Tech Stack
 
-- Go 1.26+ with `github.com/getlantern/systray` for tray icon
+- Go 1.26+ with `github.com/getlantern/systray` for tray icon (libayatana-appindicator on Linux)
 - Embedded restic 0.19.1 binary via `//go:embed`
 - YAML config via `gopkg.in/yaml.v3`
 - `github.com/emersion/go-autostart` for launch at login
+- `github.com/zalando/go-keyring` for the Linux Secret Service keychain
 - `github.com/fsnotify/fsnotify` for config file watching
 - `github.com/creativeprojects/go-selfupdate` for automatic updates
 - `tailscale.com` for Tailscale network integration
@@ -67,9 +68,11 @@ GOOS=windows GOARCH=amd64 go build -o neubibackup.exe .
 GOOS=darwin GOARCH=arm64 go build -o neubibackup-arm64 .
 ```
 
+A native Linux build needs cgo plus the tray's C libraries: `libayatana-appindicator` + `gtk3` on Arch, `libayatana-appindicator3-dev` + `libgtk-3-dev` on Debian/Ubuntu.
+
 ### Building/testing in Docker
 
-When `go` isn't installed locally, use the official `golang` image pinned to the version in `go.mod`. **Always set `GOOS` (and `GOARCH`)** to a real target platform — the container is `linux`, but this project has no Linux build (no `restart_linux.go`, `systray` requires GTK, etc.), so a default-Linux build will fail.
+When `go` isn't installed locally, use the official `golang` image pinned to the version in `go.mod`. The container is `linux`, and a default Linux build fails there because `systray` needs the ayatana-appindicator/GTK headers the image lacks. Either `apt-get install -y libayatana-appindicator3-dev libgtk-3-dev` first, or set `GOOS` (and `GOARCH`) to macOS/Windows with `CGO_ENABLED=0` as below.
 
 ```bash
 # Cross-build for macOS arm64 (CGO off to skip GTK/Cocoa deps)
@@ -104,6 +107,15 @@ docker run --rm -v "$PWD:/workspace" -w /workspace \
 - Update artifact cleanup after automatic updates
 - Uses `go-winres` in CI to embed Windows manifest with admin requirement
 
+### Linux
+
+- x86_64 only (embedded `restic_linux_amd64`); needs a StatusNotifierItem tray host. On Omarchy that's the `omarchy.tray` bar widget, which pins items by SNI id, and systray hard-codes the id `systray`
+- Keychain via the Secret Service (`go-keyring`); password dialog via `zenity --entry --hide-text`
+- Open files with `omarchy-launch-editor` when present (Omarchy's chosen editor), otherwise `xdg-open`
+- Autostart via go-autostart's XDG `~/.config/autostart/NeubiBackup.desktop` (uwsm, GNOME and KDE run these)
+- Auto-update replaces the binary in place and `syscall.Exec`s it (same PID, so the autostart systemd unit keeps tracking it); release asset is `neubibackup_linux_amd64.tar.gz`
+- Not implemented yet, all fail-open: idle time (`internal/idle`), battery (`internal/power`), Wi-Fi SSID (`internal/network`)
+
 ## Testing (REQUIRED)
 
 **Tests are mandatory for all new code.** When planning any feature or bug fix:
@@ -121,7 +133,7 @@ go test -v ./...   # Run with verbose output
 
 #### In Docker
 
-When running tests via the `golang` Docker image, you must set `GOOS` (and `GOARCH`) — see the build-in-Docker note above for why. CGO-dependent packages (`internal/idle`, `internal/network`, `internal/tray`) and the `internal/updater` package (no `restart_linux.go`) won't build under Linux defaults. Cross-test the portable packages like this:
+When running tests via the `golang` Docker image without the tray headers installed, set `GOOS` (and `GOARCH`) — see the build-in-Docker note above for why. Cross-test the portable packages like this:
 
 ```bash
 docker run --rm -v "$PWD:/workspace" -w /workspace \
@@ -129,7 +141,7 @@ docker run --rm -v "$PWD:/workspace" -w /workspace \
   golang:1.26.2 go test ./internal/config/... ./internal/scheduler/... ./internal/tailscale/...
 ```
 
-For full coverage (including CGO + platform-specific code paths), rely on CI on macOS/Windows runners.
+For full coverage (including CGO + platform-specific code paths), rely on CI (macOS and Ubuntu runners).
 
 Tests use the `NEUBIBACKUP_APP_DIR` environment variable (set via `TestMain` in test files) to redirect data to temp directories, ensuring tests never touch the real `~/neubibackup/` or `.dev-data/` directories.
 

@@ -1,11 +1,12 @@
 // Package keychain provides cross-platform access to the OS-native credential
-// vault (macOS Keychain on darwin, Windows Credential Manager on windows).
+// vault (macOS Keychain on darwin, Windows Credential Manager on windows,
+// the freedesktop Secret Service on linux).
 //
 // Stored items use a fixed service name and an account string supplied by the
 // caller (typically a restic repository path), so multiple repositories on the
 // same machine get distinct entries.
 //
-// On platforms other than darwin and windows, all functions return
+// On platforms other than darwin, windows and linux, all functions return
 // ErrUnsupported.
 package keychain
 
@@ -20,5 +21,5 @@ const ServiceName = "com.neubibackup.repository"
 var ErrNotFound = errors.New("keychain: entry not found")
 
 // ErrUnsupported is returned on platforms where the native keychain backend
-// is not implemented (anything other than darwin/windows).
+// is not implemented (anything other than darwin/windows/linux).
 var ErrUnsupported = errors.New("keychain: not supported on this platform")

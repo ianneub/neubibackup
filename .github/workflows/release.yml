@@ -407,9 +407,53 @@ jobs:
           name: neubibackup-windows-amd64-portable
           path: neubibackup.exe
 
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.2"
+
+      - name: Install tray dependencies
+        # getlantern/systray links against libayatana-appindicator (GTK 3)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libayatana-appindicator3-dev libgtk-3-dev
+
+      - name: Download restic binary for Linux
+        run: ./scripts/download-restic.sh linux amd64
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 1
+        run: go build -ldflags "-X neubibackup/internal/version.Version=${{ steps.version.outputs.VERSION }}" -o neubibackup .
+
+      - name: Create tarball for auto-updates
+        run: |
+          # go-selfupdate expects naming: {cmd}_{goos}_{goarch}.tar.gz
+          tar -czf neubibackup_linux_amd64.tar.gz neubibackup
+          ls -la neubibackup_linux_amd64.tar.gz
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: neubibackup-linux-amd64-tarball
+          path: neubibackup_linux_amd64.tar.gz
+
   release:
     name: Create Release
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -437,6 +481,8 @@ jobs:
           cp artifacts/neubibackup-windows-amd64-installer/NeubiBackup-Setup.exe release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-setup.exe
           # Windows portable EXE (for auto-updates via go-selfupdate)
           cp artifacts/neubibackup-windows-amd64-portable/neubibackup.exe release/neubibackup_windows_amd64.exe
+          # Linux tarball (for manual install and auto-updates via go-selfupdate)
+          cp artifacts/neubibackup-linux-amd64-tarball/neubibackup_linux_amd64.tar.gz release/
 
       - name: Generate checksums
         run: |
@@ -459,4 +505,5 @@ jobs:
             release/NeubiBackup-${{ steps.version.outputs.VERSION }}-macos-amd64.dmg
             release/NeubiBackup-${{ steps.version.outputs.VERSION }}-windows-amd64-setup.exe
             release/neubibackup_windows_amd64.exe
+            release/neubibackup_linux_amd64.tar.gz
             release/SHA256SUMS.txt

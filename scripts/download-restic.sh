@@ -7,6 +7,7 @@
 #   ./download-restic.sh                  # Download all platforms
 #   ./download-restic.sh darwin arm64     # Download only macOS arm64
 #   ./download-restic.sh windows amd64    # Download only Windows amd64
+#   ./download-restic.sh linux amd64      # Download only Linux amd64
 
 set -e
 
@@ -103,12 +104,16 @@ if [ -n "$1" ] && [ -n "$2" ]; then
     if [ "$TARGET_OS" != "windows" ] || [ "$TARGET_ARCH" != "amd64" ]; then
         create_dummy "windows" "amd64"
     fi
+    if [ "$TARGET_OS" != "linux" ] || [ "$TARGET_ARCH" != "amd64" ]; then
+        create_dummy "linux" "amd64"
+    fi
 else
     # Download all platforms
     PLATFORMS=(
         "darwin_arm64"
         "darwin_amd64"
         "windows_amd64"
+        "linux_amd64"
     )
 
     for PLATFORM in "${PLATFORMS[@]}"; do

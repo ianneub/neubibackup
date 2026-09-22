@@ -11,12 +11,14 @@ require (
 	github.com/getlantern/systray v1.2.2
 	github.com/keybase/go-keychain v0.0.1
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	tailscale.com v1.96.5
 )
 
 require (
+	al.essio.dev/pkg/shellescape v1.6.0 // indirect
 	code.gitea.io/sdk/gitea v0.22.1 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/42wim/httpsig v1.2.3 // indirect

@@ -11,7 +11,7 @@ A simple system tray application that automatically backs up your files using [r
 - **Retry with backoff** - Automatically retries failed backups (up to 5 attempts)
 - **System tray interface** - Runs quietly in the background with status at a glance
 - **Progress display** - See real-time progress during backups
-- **Native OS keychain integration** - Store the restic password securely in macOS Keychain or Windows Credential Manager
+- **Native OS keychain integration** - Store the restic password securely in macOS Keychain, Windows Credential Manager, or the Linux Secret Service (GNOME Keyring, KWallet)
 - **Monitoring integrations** - Optional healthchecks.io and Pushover notifications
 - **No restic installation required** - Restic is bundled with the app
 - **Automatic updates** - Updates are downloaded and applied silently in the background
@@ -22,6 +22,7 @@ A simple system tray application that automatically backs up your files using [r
 
 - macOS (Apple Silicon and Intel)
 - Windows (64-bit)
+- Linux (x86_64) - needs a desktop with a StatusNotifierItem tray (e.g. Omarchy, KDE, GNOME with the AppIndicator extension)
 
 ## Installation
 
@@ -46,6 +47,14 @@ Download the latest release for your platform:
 1. Download the `-setup.exe` installer
 2. Run the installer and follow the prompts
 3. On launch, you'll see a UAC prompt - this is required for VSS snapshots (consistent backups of open files) and automatic updates
+
+### Linux
+
+1. Install the tray library and the dialog tool (Arch: `libayatana-appindicator` and `zenity`; Debian/Ubuntu: `libayatana-appindicator3-1` and `zenity`)
+2. Download `neubibackup_linux_amd64.tar.gz` and extract `neubibackup` into a directory you own that is on your `PATH`, such as `~/.local/bin` (automatic updates replace the binary in place, so the directory must be writable)
+3. Run `neubibackup`, then turn on **Start at Login** in the tray menu. This writes `~/.config/autostart/NeubiBackup.desktop`, which XDG-autostart-aware sessions (GNOME, KDE, uwsm/Omarchy) launch at login
+
+On Omarchy, the icon lands in the bar's tray drawer. To keep it visible, add `"systray"` to the `pinned` list of the `omarchy.tray` widget in `~/.config/omarchy/shell.json`.
 
 ## Quick Start
 
@@ -95,7 +104,7 @@ repository:
   # password_file: "/path/to/password-file"
   # OR run a command to fetch the password:
   # password_command: "security find-generic-password -s restic -w"
-  # OR (recommended on macOS/Windows) store in the OS keychain — see
+  # OR (recommended) store in the OS keychain — see
   # "Storing the password in the OS keychain" below for setup:
   # use_keychain: true
 
@@ -124,6 +133,8 @@ restic_args:
   #   --one-file-system    (don't cross filesystem boundaries)
   #   --exclude-caches     (skip directories with CACHEDIR.TAG)
   #   --use-fs-snapshot    (Windows only: use VSS for consistent snapshots)
+  # On Linux btrfs, --one-file-system also stops at subvolume boundaries:
+  # list each subvolume you want backed up under backup.paths.
 
 # Optional: healthchecks.io monitoring
 healthchecks:
@@ -166,7 +177,9 @@ neubibackup set-password
 
 Or open the tray menu and click **Set repository password…**.
 
-The password is stored in the macOS Keychain (under service `com.neubibackup.repository`) or Windows Credential Manager (target `com.neubibackup.repository:<repo path>`). NeubiBackup reads it on every backup; you don't put it in `config.yaml` or any file.
+The password is stored in the macOS Keychain (under service `com.neubibackup.repository`), Windows Credential Manager (target `com.neubibackup.repository:<repo path>`), or on Linux the Secret Service (attributes `service=com.neubibackup.repository` and `username=<repo path>`). NeubiBackup reads it on every backup; you don't put it in `config.yaml` or any file.
+
+On Linux the tray dialog is a `zenity` prompt, and the keyring must be unlocked, which normally happens at login. Unlike macOS, the Secret Service has no per-app access control: any process running as you can read an unlocked keyring, e.g. `secret-tool lookup service com.neubibackup.repository username <repo path>`.
 
 To remove the stored password, run `neubibackup clear-password` or use the **Clear repository password** tray item.
 
@@ -225,7 +238,7 @@ Click the tray icon to access:
 
 - **Status** - Shows time since last successful backup, or progress during backup
 - **Backup Now** - Start an immediate backup (becomes "Stop Backup" while running)
-- **Open Config File** - Edit your configuration
+- **Open Config File** - Edit your configuration (on Omarchy, in the editor chosen with Omarchy's defaults)
 - **Open Logs Folder** - View backup logs
 - **Set repository password…** - Open a system dialog to store the restic password in the OS keychain. Only enabled when `use_keychain: true`.
 - **Clear repository password** - Remove the stored keychain entry. Only enabled when `use_keychain: true`.
@@ -279,7 +292,7 @@ Make sure the app is set to **Start at Login** for reliable scheduling.
 
 ### Battery power
 
-If you enable `skip_on_battery: true` in your config, scheduled backups will be deferred while running on battery power. The backup will run automatically when AC power is restored (if the schedule has fired since the last successful backup). Manual backups via "Backup Now" always run regardless of power state.
+If you enable `skip_on_battery: true` in your config, scheduled backups will be deferred while running on battery power (macOS and Windows; Linux doesn't detect the power source yet, so backups always run). The backup will run automatically when AC power is restored (if the schedule has fired since the last successful backup). Manual backups via "Backup Now" always run regardless of power state.
 
 ### WiFi SSID restrictions
 
@@ -290,7 +303,7 @@ If you configure `allowed_ssids`, scheduled backups will only run when connected
 - If WiFi is off/disconnected/cannot be detected: backup runs (fail-open for reliability)
 - Manual backups via "Backup Now" always run regardless of SSID
 
-Note: SSID matching is case-sensitive.
+Note: SSID matching is case-sensitive. On Linux, SSID detection isn't implemented yet, so `allowed_ssids` never blocks a backup (the fail-open case above).
 
 **macOS Location Permission Required**: On macOS 14 (Sonoma) and later, accessing the WiFi SSID requires Location Services permission. When you first configure `allowed_ssids`, macOS will prompt you to grant location access. If you miss the prompt or need to enable it manually:
 
@@ -311,7 +324,7 @@ When the app checks if a backup should run:
 
 This means backups automatically run when you're actively using your computer (keychain unlocked), and wait when you're away. Manual backups via "Backup Now" always run regardless of activity.
 
-The activity detection works on macOS and Windows.
+The activity detection works on macOS and Windows. On Linux, idle time isn't detected, so scheduled backups run whether or not you're at the computer. The Secret Service keyring stays unlocked for the whole session, so the locked-keychain problem this guards against doesn't arise there.
 
 ### Windows autostart not working
 
@@ -327,9 +340,13 @@ If "Start at Login" isn't working:
 
 Local `go build` produces ad-hoc-signed binaries whose code-signing hash differs from the released app. The Keychain ACL is bound to that hash, so a fresh build looks like a different program. Either click **Always Allow** once for that build, or re-run `neubibackup set-password`. Released versions don't have this problem because they all share a stable signing cert.
 
-### Keychain integration is not available on Linux
+### Linux: "Set repository password…" does nothing
 
-`use_keychain` is implemented on macOS and Windows only. On Linux, NeubiBackup falls back to `password`, `password_file`, or `password_command`.
+The tray dialog needs `zenity`; install it, or run `neubibackup set-password` in a terminal instead. If storing fails, check that a Secret Service provider (GNOME Keyring or KWallet) is running and its default collection is unlocked. `app.log` records the exact error.
+
+### Linux: tray icon missing
+
+NeubiBackup draws its icon through libayatana-appindicator, which needs a StatusNotifierItem host. Omarchy's bar provides one through the `omarchy.tray` widget; stock GNOME needs the AppIndicator extension. On Omarchy, unpinned icons sit in the tray drawer. Pin the icon by its id, `systray`.
 
 ## Automatic Updates
 
@@ -345,6 +362,10 @@ The tray menu shows the current update status:
 - **"Check for Updates"** - Click to manually check for updates
 - **"Update Available (vX.Y.Z)"** - An update was found (will be applied automatically)
 - **"Updating..."** - Update is being downloaded and applied
+
+### Linux Note
+
+The binary is replaced in place and the app re-executes itself (same PID), so whatever launched it keeps tracking it. The directory holding `neubibackup` must be writable by your user.
 
 ### macOS Note
 

@@ -72,21 +72,21 @@ A native Linux build needs cgo plus the tray's C libraries: `libayatana-appindic
 
 ### Building/testing in Docker
 
-When `go` isn't installed locally, use the official `golang` image pinned to the version in `go.mod`. The container is `linux`, and a default Linux build fails there because `systray` needs the ayatana-appindicator/GTK headers the image lacks. Either `apt-get install -y libayatana-appindicator3-dev libgtk-3-dev` first, or set `GOOS` (and `GOARCH`) to macOS/Windows with `CGO_ENABLED=0` as below.
+When `go` isn't installed locally, use the official `golang` image pinned to the version in `go.mod`. The container is `linux`, and a default Linux build fails there because `systray` needs the ayatana-appindicator/GTK headers the image lacks, so install them first. Mount the repo at a path containing `neubibackup`: `TestGetAppLogPath` checks for it in the dev data path, which is under the working directory.
 
 ```bash
-# Cross-build for macOS arm64 (CGO off to skip GTK/Cocoa deps)
-docker run --rm -v "$PWD:/workspace" -w /workspace \
-  -e GOOS=darwin -e GOARCH=arm64 -e CGO_ENABLED=0 \
-  golang:1.27.3 go build ./...
+# Full Linux build/vet/test (CGO on, tray headers installed)
+docker run --rm -v "$PWD:/src/neubibackup" -w /src/neubibackup golang:1.27.3 sh -c '
+  apt-get update -qq && apt-get install -y -qq libayatana-appindicator3-dev libgtk-3-dev &&
+  go vet ./... && go test ./...'
 
-# Cross-build for Windows
-docker run --rm -v "$PWD:/workspace" -w /workspace \
+# Cross-build for Windows (whole tree builds without CGO)
+docker run --rm -v "$PWD:/src/neubibackup" -w /src/neubibackup \
   -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 \
   golang:1.27.3 go build ./...
 ```
 
-`CGO_ENABLED=0` skips packages that need a C toolchain (`internal/idle`, `internal/network`, `internal/tray`); use it for sanity-checking deps and platform-portable code, then rely on CI for full CGO builds.
+macOS can't be cross-built in Docker: with `CGO_ENABLED=0`, `internal/idle`, `internal/keychain` and `systray` fail to compile on darwin rather than being skipped, which also breaks everything importing them (`internal/restic`, `internal/scheduler`, `internal/backup`, `internal/app`, `internal/tray` and the main package). Rely on CI's macOS runner for darwin builds.
 
 ## Platform Notes
 
@@ -133,12 +133,12 @@ go test -v ./...   # Run with verbose output
 
 #### In Docker
 
-When running tests via the `golang` Docker image without the tray headers installed, set `GOOS` (and `GOARCH`) — see the build-in-Docker note above for why. Cross-test the portable packages like this:
+Tests must run as `linux` in Docker, since the container can't execute macOS or Windows test binaries. Use the full Linux command in the build-in-Docker section above. Without the tray headers, `CGO_ENABLED=0` tests every package except the main package, `internal/app` and `internal/tray`:
 
 ```bash
-docker run --rm -v "$PWD:/workspace" -w /workspace \
-  -e GOOS=darwin -e GOARCH=arm64 -e CGO_ENABLED=0 \
-  golang:1.27.3 go test ./internal/config/... ./internal/scheduler/... ./internal/tailscale/...
+docker run --rm -v "$PWD:/src/neubibackup" -w /src/neubibackup \
+  -e CGO_ENABLED=0 \
+  golang:1.27.3 sh -c 'go test $(go list ./... | grep -v -e "^neubibackup$" -e /internal/app -e /internal/tray)'
 ```
 
 For full coverage (including CGO + platform-specific code paths), rely on CI (macOS and Ubuntu runners).

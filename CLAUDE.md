@@ -4,7 +4,7 @@ Cross-platform backup scheduler wrapping restic.
 
 ## Tech Stack
 
-- Go 1.26+ with `github.com/getlantern/systray` for tray icon (libayatana-appindicator on Linux)
+- Go 1.27+ with `github.com/getlantern/systray` for tray icon (libayatana-appindicator on Linux)
 - Embedded restic 0.19.1 binary via `//go:embed`
 - YAML config via `gopkg.in/yaml.v3`
 - `github.com/emersion/go-autostart` for launch at login
@@ -78,12 +78,12 @@ When `go` isn't installed locally, use the official `golang` image pinned to the
 # Cross-build for macOS arm64 (CGO off to skip GTK/Cocoa deps)
 docker run --rm -v "$PWD:/workspace" -w /workspace \
   -e GOOS=darwin -e GOARCH=arm64 -e CGO_ENABLED=0 \
-  golang:1.26.2 go build ./...
+  golang:1.27.3 go build ./...
 
 # Cross-build for Windows
 docker run --rm -v "$PWD:/workspace" -w /workspace \
   -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 \
-  golang:1.26.2 go build ./...
+  golang:1.27.3 go build ./...
 ```
 
 `CGO_ENABLED=0` skips packages that need a C toolchain (`internal/idle`, `internal/network`, `internal/tray`); use it for sanity-checking deps and platform-portable code, then rely on CI for full CGO builds.
@@ -138,7 +138,7 @@ When running tests via the `golang` Docker image without the tray headers instal
 ```bash
 docker run --rm -v "$PWD:/workspace" -w /workspace \
   -e GOOS=darwin -e GOARCH=arm64 -e CGO_ENABLED=0 \
-  golang:1.26.2 go test ./internal/config/... ./internal/scheduler/... ./internal/tailscale/...
+  golang:1.27.3 go test ./internal/config/... ./internal/scheduler/... ./internal/tailscale/...
 ```
 
 For full coverage (including CGO + platform-specific code paths), rely on CI (macOS and Ubuntu runners).

@@ -49,7 +49,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.2"
+          go-version: "1.27.3"
 
       - name: Download restic binary for macOS
         run: ./scripts/download-restic.sh darwin ${{ matrix.goarch }}
@@ -295,7 +295,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.2"
+          go-version: "1.27.3"
 
       - name: Download restic binary for Windows
         shell: bash
@@ -417,7 +417,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.2"
+          go-version: "1.27.3"
 
       - name: Install tray dependencies
         # getlantern/systray links against libayatana-appindicator (GTK 3)

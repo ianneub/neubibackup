@@ -76,14 +76,14 @@ When `go` isn't installed locally, use the official `golang` image pinned to the
 
 ```bash
 # Full Linux build/vet/test (CGO on, tray headers installed)
-docker run --rm -v "$PWD:/src/neubibackup" -w /src/neubibackup golang:1.27.3 sh -c '
+docker run --rm -v "$PWD:/src/neubibackup" -w /src/neubibackup golang:1.27.4 sh -c '
   apt-get update -qq && apt-get install -y -qq libayatana-appindicator3-dev libgtk-3-dev &&
   go vet ./... && go test ./...'
 
 # Cross-build for Windows (whole tree builds without CGO)
 docker run --rm -v "$PWD:/src/neubibackup" -w /src/neubibackup \
   -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 \
-  golang:1.27.3 go build ./...
+  golang:1.27.4 go build ./...
 ```
 
 macOS can't be cross-built in Docker: with `CGO_ENABLED=0`, `internal/idle`, `internal/keychain` and `systray` fail to compile on darwin rather than being skipped, which also breaks everything importing them (`internal/restic`, `internal/scheduler`, `internal/backup`, `internal/app`, `internal/tray` and the main package). Rely on CI's macOS runner for darwin builds.
@@ -138,7 +138,7 @@ Tests must run as `linux` in Docker, since the container can't execute macOS or 
 ```bash
 docker run --rm -v "$PWD:/src/neubibackup" -w /src/neubibackup \
   -e CGO_ENABLED=0 \
-  golang:1.27.3 sh -c 'go test $(go list ./... | grep -v -e "^neubibackup$" -e /internal/app -e /internal/tray)'
+  golang:1.27.4 sh -c 'go test $(go list ./... | grep -v -e "^neubibackup$" -e /internal/app -e /internal/tray)'
 ```
 
 For full coverage (including CGO + platform-specific code paths), rely on CI (macOS and Ubuntu runners).

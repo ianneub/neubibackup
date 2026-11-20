@@ -5,7 +5,7 @@ Cross-platform backup scheduler wrapping restic.
 ## Tech Stack
 
 - Go 1.27+ with `github.com/getlantern/systray` for tray icon (libayatana-appindicator on Linux)
-- Embedded restic 0.19.1 binary via `//go:embed`
+- Embedded restic 0.20.0 binary via `//go:embed`
 - YAML config via `gopkg.in/yaml.v3`
 - `github.com/emersion/go-autostart` for launch at login
 - `github.com/zalando/go-keyring` for the Linux Secret Service keychain

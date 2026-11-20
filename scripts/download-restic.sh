@@ -11,7 +11,7 @@
 
 set -e
 
-RESTIC_VERSION="0.19.1"
+RESTIC_VERSION="0.20.0"
 BINARIES_DIR="$(dirname "$0")/../internal/restic"
 
 # Create binaries directory

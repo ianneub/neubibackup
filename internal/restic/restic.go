@@ -65,4 +65,4 @@ func extractBinary() (string, error) {
 }
 
 // Version returns the restic version string.
-const Version = "0.19.1"
+const Version = "0.20.0"
